@@ -1,0 +1,87 @@
+# Go build artifacts
+bin/
+tmp/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+*.prof
+
+# Go workspace file
+go.work
+go.work.sum
+
+# Air (live reload) files
+.air.toml.bak
+
+# Build logs
+build-errors.log
+
+# Test coverage
+*.coverprofile
+coverage.out
+coverage.html
+
+# Dependency directories
+vendor/
+
+# IDE - Go specific
+*.iml
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment files (NEVER commit these!)
+.env
+.env.local
+.env.*.local
+
+# CI/CD artifacts
+.gosec-report.json
+gosec-report.json
+release/
+*.sha256
+
+# Email templates (if generated)
+templates/*.compiled.html
+
+# Logs
+*.log
+build-errors.log
+
+# Test executables
+*.test.exe
+*.test
+integration.test.exe
+consumer.test.exe
+email.test.exe
+config.test.exe
+
+# Documentation folder (temporary)
+tmp_doc/
+
+# Code review folder (optional - can exclude if desired)
+# code-review/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Air live reload
+.air.toml.bak
+tmp/
+
+# Coverage reports (generated files)
+coverage.out
+coverage.html
+*.coverprofile
+
+# Email test outputs (if any)
+test_emails/
+email_outputs/
+
