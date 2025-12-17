@@ -49,6 +49,7 @@ func (app *e2eApplication) mount() http.Handler {
 		r.Post("/register", http.HandlerFunc(app.registerHandler))
 		r.Post("/login", http.HandlerFunc(app.loginHandler))
 		r.Post("/logout", http.HandlerFunc(app.logoutHandler))
+		r.Post("/refresh", http.HandlerFunc(app.refreshHandler))
 		r.Group(func(pr chi.Router) {
 			pr.Use(authmw.JWTAuth(app.redisClient))
 			pr.Get("/me", http.HandlerFunc(app.meHandler))
@@ -144,6 +145,38 @@ func (app *e2eApplication) logoutHandler(w http.ResponseWriter, r *http.Request)
 		MaxAge:   -1,
 	})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (app *e2eApplication) refreshHandler(w http.ResponseWriter, r *http.Request) {
+	c, err := r.Cookie("refresh_token")
+	if err != nil || c.Value == "" {
+		app.writeErrorResponse(w, "missing refresh token", "UNAUTHORIZED", http.StatusUnauthorized)
+		return
+	}
+
+	resp, appErr := app.authService.Refresh(r.Context(), c.Value)
+	if appErr != nil {
+		app.writeErrorResponse(w, appErr.Message, string(appErr.Code), appErr.Status)
+		return
+	}
+
+	// Set new refresh token cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:     "refresh_token",
+		Value:    resp.RefreshToken,
+		Path:     "/auth/v1",
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		Secure:   false,
+		MaxAge:   int((7 * 24 * time.Hour).Seconds()),
+	})
+	// Expose new access token in header
+	w.Header().Set("Authorization", "Bearer "+resp.AccessToken)
+	resp.RefreshToken = ""
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(resp)
 }
 
 func (app *e2eApplication) meHandler(w http.ResponseWriter, r *http.Request) {
