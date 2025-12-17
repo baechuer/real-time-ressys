@@ -24,6 +24,19 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
+      - name: Debug - Verify files exist
+        working-directory: ./services/auth-service
+        run: |
+          echo "Current directory: $(pwd)"
+          echo "Files in current dir:"
+          ls -la | head -10
+          echo ""
+          echo "Go files in app/:"
+          find app -name "*.go" | head -5
+          echo ""
+          echo "go.mod exists:"
+          test -f go.mod && echo "YES" || echo "NO"
+
       - name: Run gofmt
         working-directory: ./services/auth-service
         run: |
@@ -35,7 +48,7 @@ jobs:
 
       - name: Run go vet
         working-directory: ./services/auth-service
-        run: go vet .
+        run: go vet ./...
 
       - name: Run staticcheck (if available)
         working-directory: ./services/auth-service
@@ -292,7 +305,7 @@ jobs:
       - name: Generate coverage report
         working-directory: ./services/auth-service
         run: |
-          go test -coverprofile=coverage.out .
+          go test -coverprofile=coverage.out ./...
           go tool cover -html=coverage.out -o coverage.html
 
       - name: Upload coverage report
