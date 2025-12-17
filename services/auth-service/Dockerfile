@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.25-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache git make
@@ -15,13 +15,15 @@ RUN go mod download
 COPY . .
 
 # Build the application
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
     -ldflags='-w -s -extldflags "-static"' \
     -o /build/bin/auth-service \
     ./app/handlers
 
 # Final stage
-FROM alpine:latest
+FROM --platform=$TARGETPLATFORM alpine:latest
 
 # Install ca-certificates for HTTPS
 RUN apk --no-cache add ca-certificates tzdata

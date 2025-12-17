@@ -270,6 +270,7 @@ jobs:
             ${{ secrets.DOCKER_REGISTRY }}/auth-service:${{ github.sha }}
           cache-from: type=registry,ref=${{ secrets.DOCKER_REGISTRY }}/auth-service:buildcache
           cache-to: type=registry,ref=${{ secrets.DOCKER_REGISTRY }}/auth-service:buildcache,mode=max
+          platforms: linux/amd64
 
   # Test Coverage Report
   coverage:
