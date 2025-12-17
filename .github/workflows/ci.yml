@@ -179,9 +179,10 @@ jobs:
           FRONTEND_BASE_URL: http://localhost:3000
         run: |
           # Run integration tests including db_test.go (uses testcontainers)
+          # Test both package patterns - ./tests/integration/... expands to packages, ./app/config is a package
           go test -v -coverprofile=coverage-integration.out -timeout 10m \
             ./tests/integration/... \
-            ./app/config/db_test.go
+            ./app/config
 
       - name: Upload coverage to Codecov (optional)
         uses: codecov/codecov-action@v4
