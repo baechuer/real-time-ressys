@@ -18,13 +18,13 @@ import (
 func TestGracefulShutdown_SignalHandling(t *testing.T) {
 	// This test verifies that signal handling setup works
 	// Full graceful shutdown is tested in integration/e2e tests
-	
+
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
-	
+
 	// Verify channel is set up
 	assert.NotNil(t, quit)
-	
+
 	// In a real scenario, we'd send a signal and verify shutdown
 	// For unit testing, we just verify the setup
 }
@@ -37,7 +37,7 @@ func TestGracefulShutdown_ContextTimeout(t *testing.T) {
 
 	// Verify context is created
 	assert.NotNil(t, ctx)
-	
+
 	// Verify timeout works
 	select {
 	case <-ctx.Done():
@@ -97,4 +97,3 @@ func TestGracefulShutdown_ShutdownTimeout(t *testing.T) {
 		t.Fatal("Context should have timed out")
 	}
 }
-

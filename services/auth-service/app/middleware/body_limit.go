@@ -54,4 +54,3 @@ func getMaxBodySize() int64 {
 
 	return maxSize
 }
-

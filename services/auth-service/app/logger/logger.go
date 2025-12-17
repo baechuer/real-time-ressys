@@ -54,4 +54,3 @@ func WithRequestID(requestID string) zerolog.Logger {
 func WithUserID(userID int64) zerolog.Logger {
 	return Logger.With().Int64("user_id", userID).Logger()
 }
-

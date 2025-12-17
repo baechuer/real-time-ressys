@@ -6,10 +6,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
-	"runtime"
 
 	"github.com/alicebob/miniredis/v2"
 	cfgPkg "github.com/baechuer/real-time-ressys/services/auth-service/app/config"
@@ -403,4 +403,3 @@ func TestAuthE2E_ProtectedMissingToken(t *testing.T) {
 
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
-

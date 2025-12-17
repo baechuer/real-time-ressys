@@ -206,4 +206,3 @@ func TestBodyLimit_GETRequest(t *testing.T) {
 	// GET requests typically don't have bodies, should pass
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
-

@@ -114,4 +114,3 @@ func TestValidateRefreshToken_Missing(t *testing.T) {
 	_, err := ParseRefreshToken(context.Background(), rdb, "non-existent")
 	assert.Error(t, err)
 }
-

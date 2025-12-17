@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/baechuer/real-time-ressys/services/auth-service/app/dto"
-	"github.com/go-playground/validator/v10"
 	ut "github.com/go-playground/universal-translator"
+	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -301,7 +301,7 @@ func TestSanitizeInput_MaxLength(t *testing.T) {
 	input := "this is a very long string"
 	maxLength := 10
 	result := sanitizeInput(input, maxLength, false)
-	
+
 	// Should be truncated to 10 characters
 	assert.LessOrEqual(t, len([]rune(result)), maxLength)
 	assert.Equal(t, "this is a ", result)
@@ -311,7 +311,7 @@ func TestSanitizeInput_MaxLength(t *testing.T) {
 func TestSanitizeInput_PreserveSpecialChars(t *testing.T) {
 	input := "  P@ssw0rd!  "
 	result := sanitizeInput(input, 0, true)
-	
+
 	// Should preserve special characters, only trim
 	assert.Equal(t, "P@ssw0rd!", result)
 }
@@ -321,7 +321,7 @@ func TestSanitizeInput_PreserveSpecialChars_MaxLength(t *testing.T) {
 	input := "VeryLongPassword123!@#"
 	maxLength := 15
 	result := sanitizeInput(input, maxLength, true)
-	
+
 	// Should truncate to max length (special chars may be cut off if at the end)
 	assert.LessOrEqual(t, len([]rune(result)), maxLength)
 	// Verify it's truncated correctly
@@ -501,4 +501,3 @@ func (m *mockFieldError) Translate(ut ut.Translator) string {
 func (m *mockFieldError) Error() string {
 	return ""
 }
-

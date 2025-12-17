@@ -65,4 +65,3 @@ func TestOpenAPIHandler_ContainsServers(t *testing.T) {
 	assert.NotEmpty(t, spec.Servers)
 	assert.Equal(t, "http://localhost:8080", spec.Servers[0].URL)
 }
-

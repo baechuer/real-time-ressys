@@ -10,11 +10,11 @@ import (
 func SecurityHeaders() func(http.Handler) http.Handler {
 	// Check if security headers are enabled (default: true)
 	enabled := isSecurityHeadersEnabled()
-	
+
 	// Get environment for HSTS
 	environment := os.Getenv("ENVIRONMENT")
 	isProduction := environment == "production"
-	
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if !enabled {
@@ -36,7 +36,7 @@ func SecurityHeaders() func(http.Handler) http.Handler {
 
 			// Permissions Policy (formerly Feature Policy)
 			// Restrict access to browser features
-			w.Header().Set("Permissions-Policy", 
+			w.Header().Set("Permissions-Policy",
 				"geolocation=(), microphone=(), camera=(), payment=(), usb=(), magnetometer=(), gyroscope=(), speaker=()")
 
 			// Content Security Policy (CSP) - XSS prevention
@@ -69,4 +69,3 @@ func isSecurityHeadersEnabled() bool {
 	}
 	return enabledStr == "true" || enabledStr == "1"
 }
-

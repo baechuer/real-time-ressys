@@ -11,16 +11,16 @@ import (
 type CircuitState int
 
 const (
-	StateClosed CircuitState = iota // Normal operation - requests pass through
-	StateOpen                       // Circuit is open - requests fail immediately
-	StateHalfOpen                   // Testing if service recovered - limited requests pass
+	StateClosed   CircuitState = iota // Normal operation - requests pass through
+	StateOpen                         // Circuit is open - requests fail immediately
+	StateHalfOpen                     // Testing if service recovered - limited requests pass
 )
 
 // CircuitBreaker implements the circuit breaker pattern to prevent cascading failures
 type CircuitBreaker struct {
-	maxFailures     int           // Number of failures before opening circuit
-	resetTimeout    time.Duration // Time to wait before attempting half-open
-	halfOpenMaxCalls int          // Max calls allowed in half-open state
+	maxFailures      int           // Number of failures before opening circuit
+	resetTimeout     time.Duration // Time to wait before attempting half-open
+	halfOpenMaxCalls int           // Max calls allowed in half-open state
 
 	mu            sync.RWMutex
 	state         CircuitState
@@ -145,4 +145,3 @@ func (cb *CircuitBreaker) FailureCount() int {
 	defer cb.mu.RUnlock()
 	return cb.failureCount
 }
-

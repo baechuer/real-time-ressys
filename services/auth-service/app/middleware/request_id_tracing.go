@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"strconv"
 
+	applogger "github.com/baechuer/real-time-ressys/services/auth-service/app/logger"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/rs/zerolog"
-	applogger "github.com/baechuer/real-time-ressys/services/auth-service/app/logger"
 )
 
 // RequestIDTracing creates middleware that propagates request ID through context
@@ -17,7 +17,7 @@ func RequestIDTracing() func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Get request ID from chi middleware (already set by middleware.RequestID)
 			requestID := middleware.GetReqID(r.Context())
-			
+
 			if requestID == "" {
 				// Fallback: generate one if not set
 				requestID = strconv.FormatUint(middleware.NextRequestID(), 10)
@@ -31,7 +31,7 @@ func RequestIDTracing() func(http.Handler) http.Handler {
 
 			// Add logger to context for downstream use
 			ctx := logger.WithContext(r.Context())
-			
+
 			// Also add request ID to context for programmatic access
 			ctx = context.WithValue(ctx, "request_id", requestID)
 
@@ -57,4 +57,3 @@ func GetLoggerFromContext(ctx context.Context) zerolog.Logger {
 	}
 	return *logger
 }
-

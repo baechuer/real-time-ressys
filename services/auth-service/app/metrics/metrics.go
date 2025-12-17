@@ -152,4 +152,3 @@ func SetDependencyHealth(dependency string, healthy bool) {
 func MetricsHandler() http.Handler {
 	return promhttp.Handler()
 }
-

@@ -119,8 +119,8 @@ func TestCORS_WildcardSubdomain(t *testing.T) {
 	}))
 
 	testCases := []struct {
-		name   string
-		origin string
+		name    string
+		origin  string
 		allowed bool
 	}{
 		{"app subdomain", "https://app.example.com", true},
@@ -213,8 +213,8 @@ func TestCORS_MultipleOrigins(t *testing.T) {
 	}))
 
 	testCases := []struct {
-		origin   string
-		allowed  bool
+		origin  string
+		allowed bool
 	}{
 		{"http://localhost:3000", true},
 		{"https://app.example.com", true},
@@ -301,7 +301,7 @@ func TestIsCORSEnabled_DefaultTrue(t *testing.T) {
 	// Note: This tests the function directly, but it's not exported
 	// We test it indirectly through CORS() behavior
 	t.Setenv("CORS_ENABLED", "")
-	
+
 	handler := CORS()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -382,4 +382,3 @@ func TestIsCORSEnabled_CaseInsensitive(t *testing.T) {
 		})
 	}
 }
-

@@ -141,4 +141,3 @@ func TestSecurityHeaders_XPoweredByNotSet(t *testing.T) {
 	// (Note: handlers can still set it, but we don't set it by default)
 	assert.Empty(t, rec.Header().Get("X-Powered-By"))
 }
-

@@ -154,4 +154,3 @@ func TestRequireRoles_RejectsForbiddenRole(t *testing.T) {
 	chain.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusForbidden, rr.Code)
 }
-

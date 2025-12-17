@@ -48,4 +48,3 @@ func Metrics() func(http.Handler) http.Handler {
 		})
 	}
 }
-

@@ -84,4 +84,3 @@ func TestAdminRoute_EnforcesRole(t *testing.T) {
 	handler.ServeHTTP(rrAdmin, reqAdmin)
 	assert.Equal(t, http.StatusOK, rrAdmin.Code)
 }
-

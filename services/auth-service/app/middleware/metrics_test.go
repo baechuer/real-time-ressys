@@ -55,7 +55,7 @@ func TestMetrics_RecordsRequestSize(t *testing.T) {
 	body := []byte("test request body")
 	req := httptest.NewRequest("POST", "/test", bytes.NewReader(body))
 	req.ContentLength = int64(len(body))
-	
+
 	rctx := chi.NewRouteContext()
 	rctx.RoutePatterns = []string{"/test"}
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
@@ -65,4 +65,3 @@ func TestMetrics_RecordsRequestSize(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
-
