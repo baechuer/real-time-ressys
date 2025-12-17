@@ -42,7 +42,6 @@ func NewCircuitBreaker(maxFailures int, resetTimeout time.Duration, halfOpenMaxC
 // Call executes a function with circuit breaker protection
 func (cb *CircuitBreaker) Call(ctx context.Context, fn func() error) error {
 	cb.mu.Lock()
-	defer cb.mu.Unlock()
 
 	// Check if we should transition states
 	cb.updateState()
@@ -51,11 +50,13 @@ func (cb *CircuitBreaker) Call(ctx context.Context, fn func() error) error {
 	switch cb.state {
 	case StateOpen:
 		// Circuit is open - fail fast
+		cb.mu.Unlock()
 		return errors.New("circuit breaker is open - service unavailable")
 
 	case StateHalfOpen:
 		// Half-open - allow limited requests
 		if cb.halfOpenCalls >= cb.halfOpenMaxCalls {
+			cb.mu.Unlock()
 			return errors.New("circuit breaker is half-open - too many concurrent requests")
 		}
 		cb.halfOpenCalls++
@@ -64,9 +65,13 @@ func (cb *CircuitBreaker) Call(ctx context.Context, fn func() error) error {
 		// Normal operation - proceed
 	}
 
+	// Unlock before executing the function to avoid holding lock during I/O
+	cb.mu.Unlock()
+
 	// Execute the function
 	err := fn()
 
+	// Lock again to update state
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 

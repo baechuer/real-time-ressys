@@ -83,7 +83,12 @@ jobs:
 
       - name: Run unit tests
         working-directory: ./services/auth-service
-        run: go test -v -short -race -coverprofile=coverage-unit.out ./app/...
+        run: |
+          # Exclude integration tests (testcontainers) from unit tests
+          # db_test.go uses Docker containers which are slow - run in integration tests instead
+          # Note: -race flag makes tests 2-10x slower, but catches race conditions
+          go test -v -short -race -coverprofile=coverage-unit.out -timeout 3m \
+            $(go list ./app/... | grep -v '/config/db_test')
 
       - name: Upload coverage to Codecov (optional)
         uses: codecov/codecov-action@v4
@@ -172,7 +177,11 @@ jobs:
           RABBITMQ_URL: amqp://testuser:testpass@localhost:5672/
           JWT_SECRET: test-secret-key-for-ci-cd-pipeline-minimum-32-characters
           FRONTEND_BASE_URL: http://localhost:3000
-        run: go test -v -coverprofile=coverage-integration.out ./tests/integration/...
+        run: |
+          # Run integration tests including db_test.go (uses testcontainers)
+          go test -v -coverprofile=coverage-integration.out -timeout 10m \
+            ./tests/integration/... \
+            ./app/config/db_test.go
 
       - name: Upload coverage to Codecov (optional)
         uses: codecov/codecov-action@v4
