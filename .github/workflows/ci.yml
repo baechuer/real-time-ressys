@@ -9,9 +9,6 @@ on:
 
 env:
   GO_VERSION: '1.25'
-  POSTGRES_VERSION: '17'
-  REDIS_VERSION: '7-alpine'
-  RABBITMQ_VERSION: '3-management'
 
 jobs:
   # Lint and Format Check
@@ -86,7 +83,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:${{ env.POSTGRES_VERSION }}
+        image: postgres:17
         env:
           POSTGRES_USER: testuser
           POSTGRES_PASSWORD: testpass
@@ -100,7 +97,7 @@ jobs:
           - 5432:5432
 
       redis:
-        image: redis:${{ env.REDIS_VERSION }}
+        image: redis:7-alpine
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 10s
@@ -110,7 +107,7 @@ jobs:
           - 6379:6379
 
       rabbitmq:
-        image: rabbitmq:${{ env.RABBITMQ_VERSION }}
+        image: rabbitmq:3-management
         env:
           RABBITMQ_DEFAULT_USER: testuser
           RABBITMQ_DEFAULT_PASS: testpass
