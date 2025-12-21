@@ -7,6 +7,7 @@ import (
 	"github.com/baechuer/real-time-ressys/services/auth-service/internal/application/auth"
 	"github.com/baechuer/real-time-ressys/services/auth-service/internal/config"
 	"github.com/baechuer/real-time-ressys/services/auth-service/internal/domain"
+	"github.com/baechuer/real-time-ressys/services/auth-service/internal/infrastructure/db/postgres"
 	"github.com/baechuer/real-time-ressys/services/auth-service/internal/infrastructure/memory"
 	"github.com/baechuer/real-time-ressys/services/auth-service/internal/infrastructure/security"
 	"github.com/baechuer/real-time-ressys/services/auth-service/internal/logger"
@@ -14,9 +15,6 @@ import (
 	"github.com/baechuer/real-time-ressys/services/auth-service/internal/transport/http/middleware"
 	"github.com/baechuer/real-time-ressys/services/auth-service/internal/transport/http/response"
 	"github.com/baechuer/real-time-ressys/services/auth-service/internal/transport/http/router"
-	// "auth-service/internal/infrastructure/db/postgres"
-	// "auth-service/internal/infrastructure/messaging/rabbitmq"
-	// "auth-service/internal/infrastructure/redis"
 )
 
 func NewServer() (*http.Server, func(), error) {
@@ -26,48 +24,30 @@ func NewServer() (*http.Server, func(), error) {
 		return nil, nil, err
 	}
 
-	// // 1) init external deps (connections)
-	// db, err := config.NewDB(cfg.DBAddr, cfg.DBMaxOpen, cfg.DBMaxIdle, cfg.DBMaxIdleTime)
-	// if err != nil {
-	// 	return nil, nil, err
-	// }
-	// In-memory adapters (MVP)
-	userRepo := memory.NewUserRepo()
+	// 1) init external deps (connections)
+	db, err := config.NewDB(cfg.DBAddr, cfg.DBDebug)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// 2) build infra implementations (repos/stores/publishers)
+	userRepo := postgres.NewUserRepo(db)
+
+	// keep these in-memory for now
 	sessionStore := memory.NewSessionStore()
 	ottStore := memory.NewOneTimeTokenStore()
 	publisher := memory.NewNoopPublisher()
 
-	// Security
+	// 3) security
 	hasher := security.NewBcryptHasher(12)
 	signer := security.NewJWTSigner(cfg.JWTSecret, "auth-service")
+
 	// ✅ seed initial users (dev only)
 	if cfg.Env == "dev" {
-		memory.SeedUsers(context.Background(), userRepo, hasher)
+		postgres.SeedUsers(context.Background(), userRepo, hasher)
 	}
 
-	// rdb, err := redis.NewClient(cfg.RedisAddr) // 你实现：返回 *redis.Client 或 wrapper
-	// if err != nil {
-	// 	return nil, nil, err
-	// }
-
-	// pub, err := rabbitmq.NewPublisher(cfg.RabbitURL) // 你实现：连接 + channel
-	// if err != nil {
-	// 	return nil, nil, err
-	// }
-
-	// // 2) build infra implementations (repos/stores/publishers)
-	// userRepo := postgres.NewUserRepo(db)
-	// tokenStore := redis.NewTokenStore(rdb)
-	// emailPublisher := rabbitmq.NewEmailPublisher(pub)
-
-	// // 3) create usecase services
-	// authSvc := auth.NewService(auth.Deps{
-	// 	Users:  userRepo,
-	// 	Tokens: tokenStore,
-	// 	Email:  emailPublisher,
-	// 	Clock:  time.Now, // 可选
-	// })
-	// Usecase service
+	// 4) usecase
 	authSvc := auth.NewService(
 		userRepo,
 		hasher,
@@ -93,23 +73,19 @@ func NewServer() (*http.Server, func(), error) {
 		for k, v := range fields {
 			evt = evt.Str(k, v)
 		}
-
 		evt.Msg("audit")
 	})
-	logger.Logger.Info().Msg("audit sink installed")
 
-	// // 4) handlers
-	//authH := http_handlers.NewAuthHandler(authSvc)
-	secureCookies := cfg.Env != "dev" // dev=false, staging/prod=true
+	// 5) handlers
+	secureCookies := cfg.Env != "dev"
 	authH := http_handlers.NewAuthHandler(authSvc, cfg.RefreshTokenTTL, secureCookies)
-
 	healthH := http_handlers.NewHealthHandler()
 
-	authMW := middleware.Auth(signer, response.WriteError)
+	authMW := middleware.Auth(signer, userRepo, response.WriteError)
 	modMW := middleware.RequireAtLeast(string(domain.RoleModerator), response.WriteError)
 	adminMW := middleware.RequireAtLeast("admin", response.WriteError)
 
-	// // 5) router
+	// 6) router
 	mux, err := router.New(router.Deps{
 		Auth:    authH,
 		Health:  healthH,
@@ -117,12 +93,12 @@ func NewServer() (*http.Server, func(), error) {
 		ModMW:   modMW,
 		AdminMW: adminMW,
 	})
-
 	if err != nil {
+		_ = db.Close()
 		return nil, nil, err
 	}
 
-	// 6) http server
+	// 7) server
 	srv := &http.Server{
 		Addr:         cfg.HTTPAddr,
 		Handler:      mux,
@@ -131,13 +107,9 @@ func NewServer() (*http.Server, func(), error) {
 		IdleTimeout:  cfg.HTTPIdleTimeout,
 	}
 
-	// // 7) cleanup (important)
 	cleanup := func() {
-		// _ = pub.Close() // 你实现 Close
-		// _ = rdb.Close() // redis client close
-		// _ = db.Close()
+		_ = db.Close()
 	}
 
-	// return srv, cleanup, nil
 	return srv, cleanup, nil
 }

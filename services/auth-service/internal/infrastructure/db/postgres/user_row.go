@@ -1,8 +1,8 @@
-package domain
+package postgres
 
 import "time"
 
-type User struct {
+type userRow struct {
 	ID                string
 	Email             string
 	PasswordHash      string
@@ -11,4 +11,5 @@ type User struct {
 	Locked            bool
 	TokenVersion      int64
 	PasswordChangedAt *time.Time
+	CreatedAt         time.Time
 }

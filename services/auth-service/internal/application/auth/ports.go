@@ -25,6 +25,8 @@ type UserRepo interface {
 	UnlockUser(ctx context.Context, userID string) error
 	SetRole(ctx context.Context, userID string, role string) error
 	CountByRole(ctx context.Context, role string) (int, error)
+	GetTokenVersion(ctx context.Context, userID string) (int64, error)
+	BumpTokenVersion(ctx context.Context, userID string) (int64, error)
 }
 
 /*
@@ -47,6 +49,7 @@ type TokenClaims struct {
 	UserID string
 	Role   string
 	Exp    time.Time
+	Ver    int64
 }
 
 type TokenSigner interface {

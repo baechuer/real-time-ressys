@@ -25,6 +25,7 @@ func NewJWTSigner(secret string, issuer string) *JWTSigner {
 type accessClaims struct {
 	UserID string `json:"uid"`
 	Role   string `json:"role"`
+	Ver    int64  `json:"ver"`
 	jwt.RegisteredClaims
 }
 
@@ -74,10 +75,10 @@ func (s *JWTSigner) VerifyAccessToken(token string) (auth.TokenClaims, error) {
 	if claims.ExpiresAt != nil {
 		exp = claims.ExpiresAt.Time
 	}
-
 	return auth.TokenClaims{
 		UserID: claims.UserID,
 		Role:   claims.Role,
+		Ver:    claims.Ver,
 		Exp:    exp,
 	}, nil
 }
