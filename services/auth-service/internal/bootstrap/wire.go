@@ -10,6 +10,7 @@ import (
 	"github.com/baechuer/real-time-ressys/services/auth-service/internal/domain"
 	"github.com/baechuer/real-time-ressys/services/auth-service/internal/infrastructure/db/postgres"
 	"github.com/baechuer/real-time-ressys/services/auth-service/internal/infrastructure/memory"
+	rabbitmq_pub "github.com/baechuer/real-time-ressys/services/auth-service/internal/infrastructure/messaging/rabbitmq"
 	"github.com/baechuer/real-time-ressys/services/auth-service/internal/infrastructure/redis"
 	"github.com/baechuer/real-time-ressys/services/auth-service/internal/infrastructure/security"
 	"github.com/baechuer/real-time-ressys/services/auth-service/internal/logger"
@@ -81,8 +82,24 @@ func NewServer() (*http.Server, func(), error) {
 		ottStore = memory.NewOneTimeTokenStore()
 		logger.Logger.Warn().Msg("one-time-token store: memory (redis unavailable)")
 	}
+	var publisher auth.EventPublisher
+
+	pub, err := rabbitmq_pub.NewPublisher(cfg.RabbitURL)
+	if err != nil {
+		if cfg.Env == "dev" {
+			logger.Logger.Warn().
+				Err(err).
+				Msg("rabbitmq unavailable; using noop publisher (dev)")
+			publisher = memory.NewNoopPublisher()
+		} else {
+			_ = db.Close()
+			return nil, nil, err
+		}
+	} else {
+		publisher = pub
+	}
+
 	// keep these in-memory for now
-	publisher := memory.NewNoopPublisher()
 
 	// 3) security
 	hasher := security.NewBcryptHasher(12)
@@ -208,6 +225,10 @@ func NewServer() (*http.Server, func(), error) {
 		_ = db.Close()
 		if redisClient != nil {
 			_ = redisClient.Close()
+		}
+		type closer interface{ Close() error }
+		if c, ok := publisher.(closer); ok {
+			_ = c.Close()
 		}
 	}
 

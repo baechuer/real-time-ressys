@@ -1,3 +1,4 @@
+// api/cmd/main_test.go
 package main
 
 import (
@@ -5,7 +6,9 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/rs/zerolog"
 )
@@ -13,131 +16,274 @@ import (
 type fakeServer struct {
 	addr string
 
-	listenErr   error
-	shutdownErr error
-	closeErr    error
+	mu sync.Mutex
 
-	listenCalled   bool
+	startedCh chan struct{} // closed when ListenAndServe starts
+	stopCh    chan struct{} // closed to unblock ListenAndServe
+	doneCh    chan struct{} // closed when ListenAndServe exits
+
+	// Behavior controls
+	listenErr error // if set, ListenAndServe returns this error immediately
+
+	// Observability
 	shutdownCalled bool
 	closeCalled    bool
+	shutdownCtx    context.Context
 }
 
-func (f *fakeServer) ListenAndServe() error {
-	f.listenCalled = true
-	return f.listenErr
+func newFakeServer(addr string) *fakeServer {
+	return &fakeServer{
+		addr:      addr,
+		startedCh: make(chan struct{}),
+		stopCh:    make(chan struct{}),
+		doneCh:    make(chan struct{}),
+	}
 }
-func (f *fakeServer) Shutdown(ctx context.Context) error {
-	f.shutdownCalled = true
-	return f.shutdownErr
-}
-func (f *fakeServer) Close() error {
-	f.closeCalled = true
-	return f.closeErr
-}
+
 func (f *fakeServer) Addr() string { return f.addr }
 
-func TestRun_BootstrapFail_Returns1(t *testing.T) {
-	lg := zerolog.Nop()
-	sigCh := make(chan os.Signal, 1)
-
-	build := func() (httpServer, func(), error) {
-		return nil, func() {}, errors.New("boom")
+func (f *fakeServer) ListenAndServe() error {
+	// Mark started.
+	select {
+	case <-f.startedCh:
+		// already closed
+	default:
+		close(f.startedCh)
 	}
 
-	if got := Run(build, sigCh, lg); got != 1 {
-		t.Fatalf("expected 1, got %d", got)
+	// Crash immediately if configured.
+	if f.listenErr != nil {
+		close(f.doneCh)
+		return f.listenErr
+	}
+
+	// Otherwise block until stopped, then behave like a normal server shutdown.
+	<-f.stopCh
+	close(f.doneCh)
+	return http.ErrServerClosed
+}
+
+func (f *fakeServer) Shutdown(ctx context.Context) error {
+	f.mu.Lock()
+	f.shutdownCalled = true
+	f.shutdownCtx = ctx
+	f.mu.Unlock()
+
+	// Unblock ListenAndServe
+	select {
+	case <-f.stopCh:
+	default:
+		close(f.stopCh)
+	}
+	return nil
+}
+
+func (f *fakeServer) Close() error {
+	f.mu.Lock()
+	f.closeCalled = true
+	f.mu.Unlock()
+
+	// Unblock ListenAndServe if still running
+	select {
+	case <-f.stopCh:
+	default:
+		close(f.stopCh)
+	}
+
+	return nil
+}
+
+func (f *fakeServer) waitStarted(t *testing.T) {
+	t.Helper()
+	select {
+	case <-f.startedCh:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatalf("ListenAndServe did not start in time")
 	}
 }
 
-func TestRun_OnSignal_ShutdownAndReturn0(t *testing.T) {
-	lg := zerolog.Nop()
-
-	// Pre-send a signal so Run() will take the signal path deterministically.
-	sigCh := make(chan os.Signal, 1)
-	sigCh <- os.Interrupt
-
-	fs := &fakeServer{
-		addr:      ":0",
-		listenErr: http.ErrServerClosed, // ListenAndServe returns this on normal shutdown
+func (f *fakeServer) waitDone(t *testing.T) {
+	t.Helper()
+	select {
+	case <-f.doneCh:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatalf("ListenAndServe did not exit in time")
 	}
+}
+
+func nopLogger() zerolog.Logger {
+	// Disable output; we only care about control flow.
+	return zerolog.New(os.Stdout).Level(zerolog.Disabled)
+}
+
+func TestRun_BuildFails_Returns1_NoCleanup(t *testing.T) {
+	t.Parallel()
+
+	cleanupCalled := false
+	build := func() (httpServer, func(), error) {
+		return nil, func() { cleanupCalled = true }, errors.New("boom")
+	}
+
+	sigCh := make(chan os.Signal, 1)
+	code := Run(build, sigCh, nopLogger())
+
+	if code != 1 {
+		t.Fatalf("expected code=1, got %d", code)
+	}
+	if cleanupCalled {
+		t.Fatalf("cleanup should NOT be called when build fails")
+	}
+}
+
+func TestRun_Signal_ShutsDown_Returns0_CallsCleanup(t *testing.T) {
+	t.Parallel()
+
+	fs := newFakeServer(":1234")
 
 	cleanupCalled := false
 	build := func() (httpServer, func(), error) {
 		return fs, func() { cleanupCalled = true }, nil
 	}
 
-	got := Run(build, sigCh, lg)
-
-	if got != 0 {
-		t.Fatalf("expected 0, got %d", got)
-	}
-	if !fs.listenCalled {
-		t.Fatalf("expected ListenAndServe called")
-	}
-	if !fs.shutdownCalled {
-		t.Fatalf("expected Shutdown called")
-	}
-	if fs.closeCalled {
-		t.Fatalf("did not expect Close called on graceful shutdown")
-	}
-	if !cleanupCalled {
-		t.Fatalf("expected cleanup called")
-	}
-}
-
-func TestRun_OnServerCrash_Return1(t *testing.T) {
-	lg := zerolog.Nop()
 	sigCh := make(chan os.Signal, 1)
 
-	fs := &fakeServer{
-		addr:      ":0",
-		listenErr: errors.New("crash"),
+	// Run in goroutine so we can send signal after server starts.
+	done := make(chan int, 1)
+	go func() {
+		done <- Run(build, sigCh, nopLogger())
+	}()
+
+	// Ensure server started listening.
+	fs.waitStarted(t)
+
+	// Trigger shutdown.
+	sigCh <- os.Interrupt
+
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Fatalf("expected code=0, got %d", code)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatalf("Run did not return in time")
 	}
+
+	// Verify graceful shutdown path.
+	fs.mu.Lock()
+	shutdownCalled := fs.shutdownCalled
+	closeCalled := fs.closeCalled
+	ctx := fs.shutdownCtx
+	fs.mu.Unlock()
+
+	if !shutdownCalled {
+		t.Fatalf("expected Shutdown to be called")
+	}
+	if closeCalled {
+		t.Fatalf("did not expect Close to be called on successful Shutdown")
+	}
+	if ctx == nil {
+		t.Fatalf("expected shutdown context to be set")
+	}
+	if cleanupCalled != true {
+		t.Fatalf("expected cleanup to be called")
+	}
+
+	// Ensure server goroutine exits.
+	fs.waitDone(t)
+}
+
+func TestRun_ServerCrash_Returns1_CallsCleanup(t *testing.T) {
+	t.Parallel()
+
+	fs := newFakeServer(":1234")
+	fs.listenErr = errors.New("listen failed")
 
 	cleanupCalled := false
 	build := func() (httpServer, func(), error) {
 		return fs, func() { cleanupCalled = true }, nil
 	}
 
-	got := Run(build, sigCh, lg)
+	sigCh := make(chan os.Signal, 1)
+	code := Run(build, sigCh, nopLogger())
 
-	if got != 1 {
-		t.Fatalf("expected 1, got %d", got)
-	}
-	if !fs.listenCalled {
-		t.Fatalf("expected ListenAndServe called")
-	}
-	// crash path does not call Shutdown/Close in current Run() design
-	if fs.shutdownCalled {
-		t.Fatalf("did not expect Shutdown called on crash path")
+	if code != 1 {
+		t.Fatalf("expected code=1, got %d", code)
 	}
 	if !cleanupCalled {
-		t.Fatalf("expected cleanup called")
+		t.Fatalf("expected cleanup to be called")
 	}
+
+	// ListenAndServe should have exited.
+	fs.waitDone(t)
 }
 
-func TestRun_ShutdownFail_ForcesClose(t *testing.T) {
-	lg := zerolog.Nop()
+// ---- explicit server for shutdown-fail case ----
 
-	sigCh := make(chan os.Signal, 1)
-	sigCh <- os.Interrupt
+type shutdownFailingServer struct {
+	*fakeServer
+	shutdownErr error
+}
 
-	fs := &fakeServer{
-		addr:        ":0",
-		listenErr:   http.ErrServerClosed,
+func (s *shutdownFailingServer) Shutdown(ctx context.Context) error {
+	s.fakeServer.mu.Lock()
+	s.fakeServer.shutdownCalled = true
+	s.fakeServer.shutdownCtx = ctx
+	s.fakeServer.mu.Unlock()
+
+	// Unblock ListenAndServe
+	select {
+	case <-s.fakeServer.stopCh:
+	default:
+		close(s.fakeServer.stopCh)
+	}
+	return s.shutdownErr
+}
+
+func TestRun_ShutdownFails_ForceClose_Returns0(t *testing.T) {
+	t.Parallel()
+
+	base := newFakeServer(":1234")
+	fs := &shutdownFailingServer{
+		fakeServer:  base,
 		shutdownErr: errors.New("shutdown failed"),
 	}
 
+	cleanupCalled := false
 	build := func() (httpServer, func(), error) {
-		return fs, func() {}, nil
+		return fs, func() { cleanupCalled = true }, nil
 	}
 
-	_ = Run(build, sigCh, lg)
+	sigCh := make(chan os.Signal, 1)
 
-	if !fs.shutdownCalled {
-		t.Fatalf("expected Shutdown called")
+	done := make(chan int, 1)
+	go func() { done <- Run(build, sigCh, nopLogger()) }()
+
+	base.waitStarted(t)
+	sigCh <- os.Interrupt
+
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Fatalf("expected code=0, got %d", code)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatalf("Run did not return in time")
 	}
-	if !fs.closeCalled {
-		t.Fatalf("expected Close called when Shutdown fails")
+
+	base.mu.Lock()
+	shutdownCalled := base.shutdownCalled
+	closeCalled := base.closeCalled
+	base.mu.Unlock()
+
+	if !shutdownCalled {
+		t.Fatalf("expected Shutdown to be called")
 	}
+	if !closeCalled {
+		t.Fatalf("expected Close to be called when Shutdown fails")
+	}
+	if !cleanupCalled {
+		t.Fatalf("expected cleanup to be called")
+	}
+
+	base.waitDone(t)
 }
