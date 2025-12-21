@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -21,9 +22,14 @@ type Config struct {
 	RefreshTokenTTL time.Duration
 
 	// Infrastructure
-	DBAddr    string
-	RedisAddr string
-	RabbitURL string
+	DBAddr        string
+	RedisAddr     string
+	RedisPassword string
+	RedisDB       int
+	RabbitURL     string
+
+	// Cache tuning
+	TokenVersionCacheTTL time.Duration
 
 	HTTPReadTimeout  time.Duration
 	HTTPWriteTimeout time.Duration
@@ -41,8 +47,6 @@ type Config struct {
 
 func Load() (*Config, error) {
 	cfg := &Config{}
-	fmt.Printf("DEBUG DB_ADDR raw = %q\n", os.Getenv("DB_ADDR"))
-	fmt.Printf("DEBUG DB_ADDR len = %d\n", len(os.Getenv("DB_ADDR")))
 
 	// ✅ Env (support both APP_ENV and ENV)
 	cfg.Env = getEnvFirst([]string{"APP_ENV", "ENV"}, "dev")
@@ -101,9 +105,22 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("invalid DB_ADDR: %w", err)
 	}
 
+	// ✅ Redis (addr required in your current design)
 	cfg.RedisAddr = strings.TrimSpace(os.Getenv("REDIS_ADDR"))
 	if cfg.RedisAddr == "" {
 		return nil, fmt.Errorf("missing required env var: REDIS_ADDR")
+	}
+	cfg.RedisPassword = strings.TrimSpace(os.Getenv("REDIS_PASSWORD")) // optional, can be empty
+
+	cfg.RedisDB, err = getInt("REDIS_DB", 0)
+	if err != nil {
+		return nil, err
+	}
+
+	// ✅ Token version cache TTL (optional)
+	cfg.TokenVersionCacheTTL, err = getDuration("TOKEN_VERSION_CACHE_TTL", 10*time.Minute)
+	if err != nil {
+		return nil, err
 	}
 
 	cfg.RabbitURL = strings.TrimSpace(os.Getenv("RABBIT_URL"))
@@ -159,6 +176,18 @@ func getDuration(key string, def time.Duration) (time.Duration, error) {
 	return d, nil
 }
 
+func getInt(key string, def int) (int, error) {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return 0, fmt.Errorf("invalid int for %s: %q: %w", key, v, err)
+	}
+	return n, nil
+}
+
 func parseBool(s string) bool {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "1", "true", "yes", "y", "on":
@@ -183,6 +212,5 @@ func validatePostgresDSN(dsn string) error {
 	if strings.Trim(u.Path, "/") == "" {
 		return fmt.Errorf("missing database name in path, expected /<db>")
 	}
-	// userinfo is optional but recommended
 	return nil
 }

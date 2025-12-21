@@ -28,10 +28,6 @@ func NewAuthHandler(svc *auth.Service, refreshTTL time.Duration, secureCookies b
 	}
 }
 
-func writeNotImplemented(w http.ResponseWriter, r *http.Request) {
-	response.WriteError(w, r, domain.ErrNotImplemented())
-}
-
 func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	var req dto.RegisterRequest
 	if err := response.DecodeJSON(r, &req); err != nil {
@@ -337,7 +333,6 @@ func (h *AuthHandler) VerifyEmailRequest(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// 防枚举：无论存在与否都 204
 	response.NoContent(w)
 }
 
