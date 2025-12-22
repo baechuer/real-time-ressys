@@ -22,9 +22,13 @@ type CachedUserRepo struct {
 }
 
 func NewCachedUserRepo(inner auth.UserRepo, client *Client, ttl time.Duration) *CachedUserRepo {
+	var rdb *goredis.Client
+	if client != nil {
+		rdb = client.rdb
+	}
 	return &CachedUserRepo{
 		inner:   inner,
-		rdb:     client.rdb,
+		rdb:     rdb,
 		ttl:     ttl,
 		keyPref: "tokenver:",
 	}

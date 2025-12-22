@@ -38,13 +38,13 @@ func (s *OneTimeTokenStore) Save(ctx context.Context, kind auth.OneTimeTokenKind
 	if userID == "" {
 		return domain.ErrMissingField("user_id")
 	}
-	if s.rdb == nil {
-		return errors.New("redis one-time-token store not configured")
-	}
+
 	if ttl <= 0 {
 		return domain.ErrMissingField("ttl")
 	}
-
+	if s.rdb == nil {
+		return errors.New("redis one-time-token store not configured")
+	}
 	key := s.key(kind, token)
 	// overwrite is fine (new request generates new token anyway)
 	return s.rdb.Set(ctx, key, userID, ttl).Err()

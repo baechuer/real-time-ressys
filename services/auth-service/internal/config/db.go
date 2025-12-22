@@ -4,8 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"net/url"
-	"strings"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -16,35 +14,6 @@ func NewDB(dsn string, debug bool) (*sql.DB, error) {
 	if dsn == "" {
 		return nil, fmt.Errorf("empty DB DSN")
 	}
-	// 🔎 DEBUG: parse DSN exactly as Go sees it
-	u, err := url.Parse(dsn)
-	if err != nil {
-		return nil, fmt.Errorf("invalid DB DSN parse error: %w", err)
-	}
-
-	user := ""
-	passLen := -1
-	passBytes := []byte(nil)
-
-	if u.User != nil {
-		user = u.User.Username()
-		if p, ok := u.User.Password(); ok {
-			passLen = len(p)
-			passBytes = []byte(p)
-		}
-	}
-
-	fmt.Printf(
-		"DEBUG DSN parsed: scheme=%q host=%q user=%q passLen=%d passBytes=%v db=%q rawLen=%d\n",
-		u.Scheme,
-		u.Host,
-		user,
-		passLen,
-		passBytes,
-		strings.Trim(u.Path, "/"),
-		len(dsn),
-	)
-
 	// ---------------- actual connection ----------------
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {

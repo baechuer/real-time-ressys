@@ -1,6 +1,7 @@
 package http_handlers
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -13,7 +14,7 @@ func TestNewHealthHandler_ReturnsNonNil(t *testing.T) {
 	}
 }
 
-func TestHealthz_ReturnsOKPlainText(t *testing.T) {
+func TestHealthz_ReturnsOK_JSON(t *testing.T) {
 	h := NewHealthHandler()
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
@@ -24,22 +25,21 @@ func TestHealthz_ReturnsOKPlainText(t *testing.T) {
 	res := rr.Result()
 	defer res.Body.Close()
 
-	// 1) status code
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, res.StatusCode)
 	}
 
-	// 2) content-type header
 	gotCT := res.Header.Get("Content-Type")
-	wantCT := "text/plain; charset=utf-8"
+	wantCT := "application/json; charset=utf-8"
 	if gotCT != wantCT {
 		t.Fatalf("expected Content-Type %q, got %q", wantCT, gotCT)
 	}
 
-	// 3) response body
-	gotBody := rr.Body.String()
-	wantBody := "ok"
-	if gotBody != wantBody {
-		t.Fatalf("expected body %q, got %q", wantBody, gotBody)
+	var body map[string]string
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatalf("decode json: %v", err)
+	}
+	if body["status"] != "ok" {
+		t.Fatalf("expected status=ok, got %q", body["status"])
 	}
 }

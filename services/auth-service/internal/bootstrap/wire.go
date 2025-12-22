@@ -2,6 +2,8 @@ package bootstrap
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"net/http"
 	"time"
 
@@ -20,105 +22,149 @@ import (
 	"github.com/baechuer/real-time-ressys/services/auth-service/internal/transport/http/router"
 )
 
+/*
+========================
+ Public entry (prod)
+========================
+*/
+
 func NewServer() (*http.Server, func(), error) {
-	// 0) load config
-	cfg, err := config.Load()
+	return newServer(defaultDeps())
+}
+
+/*
+========================
+ Dependency injection
+========================
+*/
+
+type Deps struct {
+	LoadConfig func() (*config.Config, error)
+
+	NewDB func(addr string, debug bool) (dbCloser, error)
+
+	NewRedis func(addr, password string, db int) redisClient
+
+	NewPublisher func(rabbitURL string) (publisher, error)
+
+	NewRouter func(router.Deps) (http.Handler, error)
+}
+
+type dbCloser interface {
+	Close() error
+}
+
+type redisClient interface {
+	Ping(ctx context.Context) error
+	Close() error
+}
+
+type publisher interface{}
+
+/*
+========================
+ Core bootstrap logic
+========================
+*/
+
+func newServer(deps Deps) (*http.Server, func(), error) {
+	// 0) config
+	cfg, err := deps.LoadConfig()
 	if err != nil {
 		return nil, nil, err
 	}
 
-	// 1) init external deps (connections)
-	db, err := config.NewDB(cfg.DBAddr, cfg.DBDebug)
+	// 1) db
+	db, err := deps.NewDB(cfg.DBAddr, cfg.DBDebug)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	// 2) build infra implementations (repos/stores/publishers)
-	userRepo := postgres.NewUserRepo(db)
+	cleanupFns := []func(){
+		func() { _ = db.Close() },
+	}
 
-	// ---- Redis: token_version cache (best-effort) ----
-	var redisClient *redis.Client
+	// 2) user repo
+	sqlDB, ok := db.(*sql.DB)
+	if !ok {
+		runCleanup(cleanupFns)
+		return nil, nil, errors.New("bootstrap: NewDB did not return *sql.DB")
+	}
 
-	// You currently require REDIS_ADDR in config.Load().
-	// But at runtime Redis may still be temporarily unavailable.
-	// In that case, we fall back to DB (cache disabled) instead of failing startup.
-	{
-		c := redis.New(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB)
+	userRepo := postgres.NewUserRepo(sqlDB)
 
-		// Use a short timeout on Ping so bootstrap isn't blocked.
+	// 3) redis (best-effort)
+	var redisCli redisClient
+	if deps.NewRedis != nil {
+		c := deps.NewRedis(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB)
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 
 		if err := c.Ping(ctx); err != nil {
-			logger.Logger.Warn().Err(err).Msg("redis unavailable; token_version cache disabled (DB fallback)")
+			logger.Logger.Warn().Err(err).Msg("redis unavailable; cache disabled")
 			_ = c.Close()
 		} else {
-			redisClient = c
 			logger.Logger.Info().Msg("redis connected")
+			redisCli = c
+			cleanupFns = append(cleanupFns, func() { _ = c.Close() })
 		}
 	}
-	secureCookies := cfg.Env != "dev"
 
-	// Wrap repo with cache if Redis is available
+	// wrap repo with cache
 	var userRepoCached auth.UserRepo = userRepo
-	if redisClient != nil {
-		userRepoCached = redis.NewCachedUserRepo(userRepo, redisClient, cfg.TokenVersionCacheTTL)
+	if redisCli != nil {
+		userRepoCached = redis.NewCachedUserRepo(
+			userRepo,
+			redisCli.(*redis.Client),
+			cfg.TokenVersionCacheTTL,
+		)
 	}
-	// sessionStore: Redis preferred, fallback to memory (dev-friendly)
+
+	// 4) session + OTT stores
 	var sessionStore auth.SessionStore
-	if redisClient != nil {
-		sessionStore = redis.NewRedisSessionStore(redisClient)
-		logger.Logger.Info().Msg("session store: redis")
+	var ottStore auth.OneTimeTokenStore
+
+	if redisCli != nil {
+		sessionStore = redis.NewRedisSessionStore(redisCli.(*redis.Client))
+		ottStore = redis.NewOneTimeTokenStore(redisCli.(*redis.Client))
 	} else {
 		sessionStore = memory.NewSessionStore()
-		logger.Logger.Warn().Msg("session store: memory (redis unavailable)")
-	}
-	// OneTimeTokenStore: Redis preferred, fallback memory
-	var ottStore auth.OneTimeTokenStore
-	if redisClient != nil {
-		ottStore = redis.NewOneTimeTokenStore(redisClient)
-		logger.Logger.Info().Msg("one-time-token store: redis")
-	} else {
 		ottStore = memory.NewOneTimeTokenStore()
-		logger.Logger.Warn().Msg("one-time-token store: memory (redis unavailable)")
 	}
-	var publisher auth.EventPublisher
 
-	pub, err := rabbitmq_pub.NewPublisher(cfg.RabbitURL)
+	// 5) publisher
+	pub, err := deps.NewPublisher(cfg.RabbitURL)
 	if err != nil {
 		if cfg.Env == "dev" {
-			logger.Logger.Warn().
-				Err(err).
-				Msg("rabbitmq unavailable; using noop publisher (dev)")
-			publisher = memory.NewNoopPublisher()
+			logger.Logger.Warn().Err(err).Msg("rabbitmq unavailable; using noop publisher")
+			pub = memory.NewNoopPublisher()
 		} else {
-			_ = db.Close()
+			runCleanup(cleanupFns)
 			return nil, nil, err
 		}
-	} else {
-		publisher = pub
 	}
 
-	// keep these in-memory for now
+	if c, ok := pub.(interface{ Close() error }); ok {
+		cleanupFns = append(cleanupFns, func() { _ = c.Close() })
+	}
 
-	// 3) security
+	// 6) security
 	hasher := security.NewBcryptHasher(12)
 	signer := security.NewJWTSigner(cfg.JWTSecret, "auth-service")
 
-	// ✅ seed initial users (dev only)
+	// seed (dev only)
 	if cfg.Env == "dev" {
-		// seed should hit DB directly; cache is irrelevant here
 		postgres.SeedUsers(context.Background(), userRepo, hasher)
 	}
 
-	// 4) usecase
+	// 7) service
 	authSvc := auth.NewService(
-		userRepoCached, // ✅ important: cached repo here too (BumpTokenVersion updates cache)
+		userRepoCached,
 		hasher,
 		signer,
 		sessionStore,
 		ottStore,
-		publisher,
+		pub.(auth.EventPublisher),
 		auth.Config{
 			AccessTTL:             cfg.AccessTokenTTL,
 			RefreshTTL:            cfg.RefreshTokenTTL,
@@ -133,14 +179,15 @@ func NewServer() (*http.Server, func(), error) {
 		evt := logger.Logger.Info().
 			Bool("audit", true).
 			Str("action", action)
-
 		for k, v := range fields {
 			evt = evt.Str(k, v)
 		}
 		evt.Msg("audit")
 	})
 
-	// 5) handlers
+	// 8) handlers + middleware
+	secureCookies := cfg.Env != "dev"
+
 	authH := http_handlers.NewAuthHandler(authSvc, cfg.RefreshTokenTTL, secureCookies)
 	healthH := http_handlers.NewHealthHandler()
 
@@ -148,22 +195,20 @@ func NewServer() (*http.Server, func(), error) {
 	modMW := middleware.RequireAtLeast(string(domain.RoleModerator), response.WriteError)
 	adminMW := middleware.RequireAtLeast("admin", response.WriteError)
 
-	// ---- Rate Limiting (fixed window; best-effort) ----
-	// If redisClient is nil (redis down), we disable rate limiting (fail-open).
+	// rate limit (fail-open)
 	var fwLimiter *redis.FixedWindowLimiter
-	if redisClient != nil {
-		fwLimiter = redis.NewFixedWindowLimiter(redisClient)
+	if redisCli != nil {
+		fwLimiter = redis.NewFixedWindowLimiter(redisCli.(*redis.Client))
 	}
 
-	// helper to create a middleware for a routeKey
-	rl := func(routeKey string, limit int, window time.Duration) func(http.Handler) http.Handler {
+	rl := func(key string, limit int, window time.Duration) func(http.Handler) http.Handler {
 		if fwLimiter == nil {
 			return nil
 		}
 		return middleware.RateLimitFixedWindow(
 			fwLimiter,
 			middleware.FixedWindowConfig{
-				RouteKey: routeKey,
+				RouteKey: key,
 				Limit:    limit,
 				Window:   window,
 			},
@@ -171,48 +216,31 @@ func NewServer() (*http.Server, func(), error) {
 		)
 	}
 
-	// Policy table (tune as needed)
-	rlRegister := rl("auth.register", 3, time.Minute)                  // per IP
-	rlLogin := rl("auth.login", 5, time.Minute)                        // per IP
-	rlRefresh := rl("auth.refresh", 10, time.Minute)                   // per user (or IP if anonymous)
-	rlLogout := rl("auth.logout", 30, time.Minute)                     // per user
-	rlVerifyReq := rl("auth.verify_email.request", 3, 10*time.Minute)  // per IP
-	rlResetReq := rl("auth.password_reset.request", 3, 10*time.Minute) // per IP
-
-	rlPwdChange := rl("auth.password.change", 5, time.Minute)  // per user
-	rlSessRevoke := rl("auth.sessions.revoke", 5, time.Minute) // per user
-	rlMod := rl("auth.mod.actions", 30, time.Minute)           // per actor
-	rlAdmin := rl("auth.admin.actions", 60, time.Minute)       // per actor
-
-	// 6) router
-	mux, err := router.New(router.Deps{
+	// 9) router
+	mux, err := deps.NewRouter(router.Deps{
 		Auth:    authH,
 		Health:  healthH,
 		AuthMW:  authMW,
 		ModMW:   modMW,
 		AdminMW: adminMW,
 
-		RLRegister:             rlRegister,
-		RLLogin:                rlLogin,
-		RLRefresh:              rlRefresh,
-		RLLogout:               rlLogout,
-		RLVerifyEmailRequest:   rlVerifyReq,
-		RLPasswordResetRequest: rlResetReq,
-		RLPasswordChange:       rlPwdChange,
-		RLSessionsRevoke:       rlSessRevoke,
-		RLModActions:           rlMod,
-		RLAdminActions:         rlAdmin,
+		RLRegister:             rl("auth.register", 3, time.Minute),
+		RLLogin:                rl("auth.login", 5, time.Minute),
+		RLRefresh:              rl("auth.refresh", 10, time.Minute),
+		RLLogout:               rl("auth.logout", 30, time.Minute),
+		RLVerifyEmailRequest:   rl("auth.verify_email.request", 3, 10*time.Minute),
+		RLPasswordResetRequest: rl("auth.password_reset.request", 3, 10*time.Minute),
+		RLPasswordChange:       rl("auth.password.change", 5, time.Minute),
+		RLSessionsRevoke:       rl("auth.sessions.revoke", 5, time.Minute),
+		RLModActions:           rl("auth.mod.actions", 30, time.Minute),
+		RLAdminActions:         rl("auth.admin.actions", 60, time.Minute),
 	})
-
 	if err != nil {
-		_ = db.Close()
-		if redisClient != nil {
-			_ = redisClient.Close()
-		}
+		runCleanup(cleanupFns)
 		return nil, nil, err
 	}
 
-	// 7) server
+	// 10) server
 	srv := &http.Server{
 		Addr:         cfg.HTTPAddr,
 		Handler:      mux,
@@ -222,15 +250,44 @@ func NewServer() (*http.Server, func(), error) {
 	}
 
 	cleanup := func() {
-		_ = db.Close()
-		if redisClient != nil {
-			_ = redisClient.Close()
-		}
-		type closer interface{ Close() error }
-		if c, ok := publisher.(closer); ok {
-			_ = c.Close()
-		}
+		runCleanup(cleanupFns)
 	}
 
 	return srv, cleanup, nil
+}
+
+/*
+========================
+ Default deps (prod)
+========================
+*/
+
+func defaultDeps() Deps {
+	return Deps{
+		LoadConfig: config.Load,
+		NewDB: func(addr string, debug bool) (dbCloser, error) {
+			return config.NewDB(addr, debug)
+		},
+		NewRedis: func(addr, password string, db int) redisClient {
+			return redis.New(addr, password, db)
+		},
+		NewPublisher: func(url string) (publisher, error) {
+			return rabbitmq_pub.NewPublisher(url)
+		},
+		NewRouter: func(d router.Deps) (http.Handler, error) {
+			return router.New(d)
+		},
+	}
+}
+
+/*
+========================
+ helpers
+========================
+*/
+
+func runCleanup(fns []func()) {
+	for i := len(fns) - 1; i >= 0; i-- {
+		fns[i]()
+	}
 }
