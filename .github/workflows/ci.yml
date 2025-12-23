@@ -1,0 +1,136 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-and-lint:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        svc: [auth-service, event-service, join-service, email-service]
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22.x"
+          cache: true
+          cache-dependency-path: |
+            services/${{ matrix.svc }}/go.sum
+
+      - name: Unit tests (${{ matrix.svc }})
+        working-directory: services/${{ matrix.svc }}
+        run: |
+          set -euo pipefail
+          go mod download
+          go test ./... -race -count=1 -coverprofile=coverage.unit.out
+
+      # lint：建议先只对 auth-service 开启，等其他 service 成型后再加进来
+      - name: golangci-lint (auth-service only)
+        if: ${{ matrix.svc == 'auth-service' }}
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.60.3
+          args: --timeout=5m
+          working-directory: services/auth-service
+
+      - name: Upload unit coverage artifact (${{ matrix.svc }})
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-unit-${{ matrix.svc }}
+          path: services/${{ matrix.svc }}/coverage.unit.out
+          if-no-files-found: error
+
+  integration-auth:
+    runs-on: ubuntu-latest
+    needs: [unit-and-lint]
+    defaults:
+      run:
+        shell: bash
+    env:
+      # 让 integration tests 用 docker 暴露出来的端口
+      IT_PG_DSN: postgres://user:pass@localhost:54321/app?sslmode=disable
+      IT_REDIS_ADDR: localhost:63791
+      # 用 compose 创建的 rabbit 用户（你现在是 it/it）
+      IT_RABBIT_URL: amqp://it:it@localhost:56731/
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22.x"
+          cache: true
+          cache-dependency-path: |
+            services/auth-service/go.sum
+
+      - name: Docker info
+        run: docker version
+
+      - name: Compose up (auth integration infra)
+        working-directory: services/auth-service
+        run: |
+          set -euo pipefail
+          docker compose -f test/integration/infra/compose.yaml up -d
+          docker compose -f test/integration/infra/compose.yaml ps
+
+      - name: Integration tests (auth-service)
+        working-directory: services/auth-service
+        run: |
+          set -euo pipefail
+          # 你本地也是 -p=1，CI 一样保持避免并发抢资源
+          go test -tags=integration ./test/integration/... -count=1 -p=1 -v -timeout 5m -coverprofile=coverage.it.out
+
+      - name: Merge coverage (unit + integration)
+        working-directory: services/auth-service
+        run: |
+          set -euo pipefail
+          # 安装 gocovmerge
+          go install github.com/wadey/gocovmerge@latest
+          # 合并
+          "$(go env GOPATH)/bin/gocovmerge" coverage.unit.out coverage.it.out > coverage.all.out
+          # 生成 html + func 摘要
+          go tool cover -html=coverage.all.out -o coverage.all.html
+          go tool cover -func=coverage.all.out > coverage.all.func.txt
+
+      - name: Upload auth combined coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-auth-all
+          path: |
+            services/auth-service/coverage.it.out
+            services/auth-service/coverage.all.out
+            services/auth-service/coverage.all.html
+            services/auth-service/coverage.all.func.txt
+          if-no-files-found: error
+
+      - name: Compose logs on failure
+        if: failure()
+        working-directory: services/auth-service
+        run: |
+          docker compose -f test/integration/infra/compose.yaml logs --no-color
+
+      - name: Compose down
+        if: always()
+        working-directory: services/auth-service
+        run: |
+          docker compose -f test/integration/infra/compose.yaml down -v

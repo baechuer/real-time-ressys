@@ -1,0 +1,81 @@
+*EN.md
+*CN.md
+*description.md
+.continue
+.env
+# =========================
+# VSCode
+# =========================
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
+
+# =========================
+# OS junk
+# =========================
+.DS_Store
+Thumbs.db
+
+# =========================
+# Env / secrets
+# =========================
+.env
+**/.env
+.env.*
+**/.env.*
+
+# =========================
+# Go build/test outputs
+# =========================
+bin/
+dist/
+out/
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage.*
+*.coverprofile
+
+# =========================
+# Air (hot reload) temp dirs
+# (you showed tmp/ in your .air config)
+# =========================
+tmp/
+**/tmp/
+build-errors.log
+**/build-errors.log
+
+# =========================
+# Logs
+# =========================
+*.log
+
+# =========================
+# Node (if any frontend/tools exist)
+# =========================
+node_modules/
+**/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# =========================
+# IDEs
+# =========================
+.idea/
+*.iml
+
+# =========================
+# Terraform (if you ever add infra)
+# =========================
+.terraform/
+*.tfstate
+*.tfstate.*
+.crash.log
+*.txt
