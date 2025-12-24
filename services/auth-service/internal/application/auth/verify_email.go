@@ -17,10 +17,13 @@ func (s *Service) VerifyEmailRequest(ctx context.Context, email string) error {
 
 	u, err := s.users.GetByEmail(ctx, email)
 	if err != nil {
-		// 防枚举：用户不存在也返回成功
+		// If user don't exist we will just return null to prevent leaking user
 		return nil
 	}
-
+	if u.EmailVerified == true {
+		// If user is already verified we still return null to prevent leaking information.
+		return nil
+	}
 	token, err := newOpaqueToken(32)
 	if err != nil {
 		return domain.ErrRandomFailed(err)

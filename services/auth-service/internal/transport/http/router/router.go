@@ -151,7 +151,7 @@ func New(deps Deps) (http.Handler, error) {
 		} else {
 			r.Post("/verify-email/request", deps.Auth.VerifyEmailRequest)
 		}
-		r.Get("/verify-email/confirm", deps.Auth.VerifyEmailConfirmGET) // ?token=...
+		//r.Get("/verify-email/confirm", deps.Auth.VerifyEmailConfirmGET) // ?token=...
 		r.Post("/verify-email/confirm", deps.Auth.VerifyEmailConfirmPOST)
 
 		// --- Password reset ---
