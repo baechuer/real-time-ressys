@@ -24,7 +24,7 @@ func TestEventsHandler_GetPublic(t *testing.T) {
 	// Note: In a real scenario, you'd use a Mock for the service.
 	// Here we use the real service with a memory repo for simplicity.
 	repo := &mockRepo{} // You'd implement the EventRepo interface here
-	svc := event.New(repo, mockClock{t: now})
+	svc := event.New(repo, mockClock{t: now}, nil)
 	h := NewEventsHandler(svc, mockClock{t: now})
 
 	t.Run("return_400_on_invalid_uuid", func(t *testing.T) {

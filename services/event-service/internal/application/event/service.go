@@ -2,17 +2,25 @@ package event
 
 import (
 	"strings"
+	"time"
 
 	"github.com/baechuer/real-time-ressys/services/event-service/internal/domain"
 )
 
+type Clock interface{ Now() time.Time }
+
 type Service struct {
 	repo  EventRepo
+	pub   EventPublisher // NEW
 	clock Clock
 }
 
-func New(repo EventRepo, clock Clock) *Service {
-	return &Service{repo: repo, clock: clock}
+func New(repo EventRepo, clock Clock, pub EventPublisher) *Service {
+	return &Service{
+		repo:  repo,
+		pub:   pub,
+		clock: clock,
+	}
 }
 
 func isUser(role string) bool      { return role == "user" }

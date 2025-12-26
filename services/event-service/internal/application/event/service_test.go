@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/baechuer/real-time-ressys/services/event-service/internal/domain"
-	"github.com/stretchr/testify/assert" // 建议使用 testify 简化断言
+	"github.com/stretchr/testify/assert"
 )
 
 // --- Mocks & Helpers ---
@@ -53,7 +53,7 @@ func mustTime(t *testing.T, s string) time.Time {
 func TestService_Cancel_Success(t *testing.T) {
 	now := mustTime(t, "2025-12-25T10:00:00Z")
 	repo := newMemRepo()
-	svc := New(repo, fakeClock{t: now})
+	svc := New(repo, fakeClock{t: now}, NoopPublisher{})
 
 	// 1. Setup a published event
 	eventID := "evt_123"
@@ -92,7 +92,7 @@ func TestService_Cancel_Success(t *testing.T) {
 func TestService_Publish_Validation(t *testing.T) {
 	now := mustTime(t, "2025-12-25T10:00:00Z")
 	repo := newMemRepo()
-	svc := New(repo, fakeClock{t: now})
+	svc := New(repo, fakeClock{t: now}, NoopPublisher{})
 
 	t.Run("cannot_publish_with_start_time_in_past", func(t *testing.T) {
 		eventID := "evt_past"
@@ -125,7 +125,7 @@ func TestService_Publish_Validation(t *testing.T) {
 
 func TestService_GetPublic_Visibility(t *testing.T) {
 	repo := newMemRepo()
-	svc := New(repo, fakeClock{t: time.Now()})
+	svc := New(repo, fakeClock{t: time.Now()}, NoopPublisher{})
 
 	t.Run("hidden_if_draft", func(t *testing.T) {
 		repo.byID["d1"] = &domain.Event{ID: "d1", Status: domain.StatusDraft}

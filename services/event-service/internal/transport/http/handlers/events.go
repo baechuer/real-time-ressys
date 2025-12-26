@@ -35,7 +35,7 @@ func (h *EventsHandler) ListPublic(w http.ResponseWriter, r *http.Request) {
 	switch sort {
 	case "", "time", "popularity":
 	default:
-		response.Err(w, domain.ErrValidationMeta("invalid query param", map[string]string{
+		response.Err(w, r, domain.ErrValidationMeta("invalid query param", map[string]string{
 			"sort": "must be one of: time, popularity",
 		}))
 		return
@@ -54,7 +54,7 @@ func (h *EventsHandler) ListPublic(w http.ResponseWriter, r *http.Request) {
 	if v := q.Get("from"); v != "" {
 		t, err := time.Parse(time.RFC3339, v)
 		if err != nil {
-			response.Err(w, domain.ErrValidationMeta("invalid query param", map[string]string{
+			response.Err(w, r, domain.ErrValidationMeta("invalid query param", map[string]string{
 				"from": "must be RFC3339 timestamp",
 			}))
 			return
@@ -66,7 +66,7 @@ func (h *EventsHandler) ListPublic(w http.ResponseWriter, r *http.Request) {
 	if v := q.Get("to"); v != "" {
 		t, err := time.Parse(time.RFC3339, v)
 		if err != nil {
-			response.Err(w, domain.ErrValidationMeta(
+			response.Err(w, r, domain.ErrValidationMeta(
 				"invalid query param",
 				map[string]string{"to": "must be RFC3339"},
 			))
@@ -89,7 +89,7 @@ func (h *EventsHandler) ListPublic(w http.ResponseWriter, r *http.Request) {
 
 	items, total, err := h.svc.ListPublic(r.Context(), filter)
 	if err != nil {
-		response.Err(w, err)
+		response.Err(w, r, err)
 		return
 	}
 	now := h.clock.Now().UTC()
@@ -109,14 +109,14 @@ func (h *EventsHandler) ListPublic(w http.ResponseWriter, r *http.Request) {
 func (h *EventsHandler) GetPublic(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "event_id")
 	if !validate.IsUUID(id) {
-		response.Err(w, domain.ErrValidationMeta("invalid path param", map[string]string{
+		response.Err(w, r, domain.ErrValidationMeta("invalid path param", map[string]string{
 			"event_id": "must be uuid",
 		}))
 		return
 	}
 	ev, err := h.svc.GetPublic(r.Context(), id)
 	if err != nil {
-		response.Err(w, err)
+		response.Err(w, r, err)
 		return
 	}
 	now := h.clock.Now().UTC()
@@ -128,7 +128,7 @@ func (h *EventsHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req dto.CreateEventReq
 	if err := validate.DecodeJSON(r, &req); err != nil {
 		// If validate.DecodeJSON returns plain error, wrap it as validation_error
-		response.Err(w, domain.ErrValidationMeta("invalid json body", map[string]string{
+		response.Err(w, r, domain.ErrValidationMeta("invalid json body", map[string]string{
 			"body": "malformed JSON or invalid fields",
 		}))
 		return
@@ -146,7 +146,7 @@ func (h *EventsHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	ev, err := h.svc.Create(r.Context(), cmd)
 	if err != nil {
-		response.Err(w, err)
+		response.Err(w, r, err)
 		return
 	}
 	now := h.clock.Now().UTC()
@@ -156,7 +156,7 @@ func (h *EventsHandler) Create(w http.ResponseWriter, r *http.Request) {
 func (h *EventsHandler) Update(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "event_id")
 	if !validate.IsUUID(id) {
-		response.Err(w, domain.ErrValidationMeta("invalid path param", map[string]string{
+		response.Err(w, r, domain.ErrValidationMeta("invalid path param", map[string]string{
 			"event_id": "must be uuid",
 		}))
 		return
@@ -164,7 +164,7 @@ func (h *EventsHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	var req dto.UpdateEventReq
 	if err := validate.DecodeJSON(r, &req); err != nil {
-		response.Err(w, domain.ErrValidationMeta("invalid json body", map[string]string{
+		response.Err(w, r, domain.ErrValidationMeta("invalid json body", map[string]string{
 			"body": "malformed JSON or invalid fields",
 		}))
 		return
@@ -185,7 +185,7 @@ func (h *EventsHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	ev, err := h.svc.Update(r.Context(), cmd)
 	if err != nil {
-		response.Err(w, err)
+		response.Err(w, r, err)
 		return
 	}
 
@@ -196,7 +196,7 @@ func (h *EventsHandler) Update(w http.ResponseWriter, r *http.Request) {
 func (h *EventsHandler) Publish(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "event_id")
 	if !validate.IsUUID(id) {
-		response.Err(w, domain.ErrValidationMeta("invalid path param", map[string]string{
+		response.Err(w, r, domain.ErrValidationMeta("invalid path param", map[string]string{
 			"event_id": "must be uuid",
 		}))
 		return
@@ -204,7 +204,7 @@ func (h *EventsHandler) Publish(w http.ResponseWriter, r *http.Request) {
 
 	ev, err := h.svc.Publish(r.Context(), id, middleware.UserID(r), middleware.Role(r))
 	if err != nil {
-		response.Err(w, err)
+		response.Err(w, r, err)
 		return
 	}
 
@@ -215,7 +215,7 @@ func (h *EventsHandler) Publish(w http.ResponseWriter, r *http.Request) {
 func (h *EventsHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "event_id")
 	if !validate.IsUUID(id) {
-		response.Err(w, domain.ErrValidationMeta("invalid path param", map[string]string{
+		response.Err(w, r, domain.ErrValidationMeta("invalid path param", map[string]string{
 			"event_id": "must be uuid",
 		}))
 		return
@@ -223,7 +223,7 @@ func (h *EventsHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 
 	ev, err := h.svc.Cancel(r.Context(), id, middleware.UserID(r), middleware.Role(r))
 	if err != nil {
-		response.Err(w, err)
+		response.Err(w, r, err)
 		return
 	}
 
@@ -247,7 +247,7 @@ func (h *EventsHandler) ListMine(w http.ResponseWriter, r *http.Request) {
 
 	items, total, err := h.svc.ListMyEvents(r.Context(), middleware.UserID(r), middleware.Role(r), page, pageSize)
 	if err != nil {
-		response.Err(w, err)
+		response.Err(w, r, err)
 		return
 	}
 	now := h.clock.Now().UTC()

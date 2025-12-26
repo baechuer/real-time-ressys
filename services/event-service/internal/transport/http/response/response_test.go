@@ -48,7 +48,8 @@ func TestErr(t *testing.T) {
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				rr := httptest.NewRecorder()
-				Err(rr, tt.err)
+				req := httptest.NewRequest(http.MethodGet, "http://example.com", nil)
+				Err(rr, req, tt.err)
 
 				assert.Equal(t, tt.wantStatus, rr.Code)
 
