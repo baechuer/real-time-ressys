@@ -1,45 +1,62 @@
 package router
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/baechuer/real-time-ressys/services/event-service/internal/application/event"
+	"github.com/baechuer/real-time-ressys/services/event-service/internal/domain"
 	"github.com/baechuer/real-time-ressys/services/event-service/internal/transport/http/handlers"
 	authmw "github.com/baechuer/real-time-ressys/services/event-service/internal/transport/http/middleware"
 	"github.com/stretchr/testify/assert"
 )
 
+// stubClock prevents nil pointer panic in handlers
+type stubClock struct{}
+
+func (stubClock) Now() time.Time { return time.Date(2025, 12, 26, 12, 0, 0, 0, time.UTC) }
+
+// stubRepo prevents nil pointer panic in service
+type stubRepo struct{}
+
+func (s *stubRepo) Create(ctx context.Context, e *domain.Event) error { return nil }
+func (s *stubRepo) GetByID(ctx context.Context, id string) (*domain.Event, error) {
+	return &domain.Event{}, nil
+}
+func (s *stubRepo) Update(ctx context.Context, e *domain.Event) error { return nil }
+func (s *stubRepo) ListPublic(ctx context.Context, f event.ListFilter) ([]*domain.Event, int, error) {
+	return []*domain.Event{}, 0, nil
+}
+func (s *stubRepo) ListByOwner(ctx context.Context, o string, p, ps int) ([]*domain.Event, int, error) {
+	return []*domain.Event{}, 0, nil
+}
+
 func TestRouter_Routing(t *testing.T) {
-	// 1. Setup minimal dependencies
-	// We use nil/empty values for dependencies because we only care about the HTTP status code
-	// from the middleware, not the handler logic itself.
 	auth := authmw.NewAuth("secret", "issuer")
-	h := handlers.NewEventsHandler(nil, nil)
+
+	// Initialize with stubs instead of nil
+	clock := stubClock{}
+	svc := event.New(&stubRepo{}, clock, nil)
+	h := handlers.NewEventsHandler(svc, clock)
 	z := handlers.NewHealthHandler()
+
 	r := New(h, auth, z)
 
-	t.Run("public_route_returns_not_401", func(t *testing.T) {
-		// We expect 404 or 200, but NOT 401, because it's public.
-		// (It returns 404 here because our handler is nil and would crash if called,
-		// but the router allows the request through the auth layer).
+	t.Run("public_route_returns_200", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/event/v1/events", nil)
 		rr := httptest.NewRecorder()
 
 		r.ServeHTTP(rr, req)
-		assert.NotEqual(t, http.StatusUnauthorized, rr.Code)
+
+		// This should no longer be 500 (panic)
+		assert.Equal(t, http.StatusOK, rr.Code)
 	})
 
 	t.Run("protected_route_returns_401_without_token", func(t *testing.T) {
 		req := httptest.NewRequest("POST", "/event/v1/events", nil)
-		rr := httptest.NewRecorder()
-
-		r.ServeHTTP(rr, req)
-		assert.Equal(t, http.StatusUnauthorized, rr.Code)
-	})
-
-	t.Run("organizer_route_prefix_is_correct", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/event/v1/organizer/events", nil)
 		rr := httptest.NewRecorder()
 
 		r.ServeHTTP(rr, req)

@@ -11,6 +11,12 @@ import (
 
 // --- Mocks & Helpers ---
 
+// NoopPublisher satisfies the EventPublisher interface for testing
+
+func (p NoopPublisher) Publish(ctx context.Context, exchange string, routingKey string, msg any) error {
+	return nil
+}
+
 type fakeClock struct{ t time.Time }
 
 func (c fakeClock) Now() time.Time { return c.t }
@@ -106,7 +112,8 @@ func TestService_Publish_Validation(t *testing.T) {
 
 		_, err := svc.Publish(context.Background(), eventID, "owner", "user")
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "must be in the future")
+		// FIXED: 匹配你代码中实际返回的错误消息
+		assert.Contains(t, err.Error(), "cannot publish event in the past")
 	})
 
 	t.Run("cannot_publish_if_already_canceled", func(t *testing.T) {
