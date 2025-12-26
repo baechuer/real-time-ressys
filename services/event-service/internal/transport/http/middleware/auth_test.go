@@ -87,3 +87,16 @@ func TestAccessLog(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, rr.Code)
 	assert.Equal(t, "hello", rr.Body.String())
 }
+func TestAccessLog_DefaultStatus(t *testing.T) {
+	req := httptest.NewRequest("GET", "/implicit-ok", nil)
+	rr := httptest.NewRecorder()
+
+	// Handler 仅写入 Body，不写 Header
+	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("ok"))
+	})
+
+	AccessLog(nextHandler).ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+}

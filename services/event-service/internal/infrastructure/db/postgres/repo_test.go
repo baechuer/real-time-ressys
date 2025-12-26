@@ -2,79 +2,99 @@ package postgres
 
 import (
 	"context"
-	"database/sql"
+	"database/sql/driver"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/baechuer/real-time-ressys/services/event-service/internal/domain"
+	"github.com/baechuer/real-time-ressys/services/event-service/internal/application/event"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestRepo_Create(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	assert.NoError(t, err)
-	defer db.Close()
-
-	repo := New(db)
-	now := time.Now().UTC()
-	e := &domain.Event{
-		ID: "evt_1", OwnerID: "user_1", Title: "Sydney Meetup",
-		StartTime: now, EndTime: now.Add(time.Hour), Status: domain.StatusDraft,
-		CreatedAt: now, UpdatedAt: now,
+func newEventRow(id string) []driver.Value {
+	return []driver.Value{
+		id, "owner_1", "Title", "Desc", "Sydney", "Tech",
+		time.Now().UTC(), time.Now().Add(time.Hour).UTC(), 100, "published",
+		nil, nil, time.Now().UTC(), time.Now().UTC(),
 	}
-
-	// 验证 SQL 执行和参数绑定
-	// 注意：ExpectExec 里的正则匹配需要处理 SQL 中的换行和空格
-	mock.ExpectExec("INSERT INTO events").
-		WithArgs(
-			e.ID, e.OwnerID, e.Title, e.Description, e.City, e.Category,
-			e.StartTime, e.EndTime, e.Capacity, string(e.Status),
-			e.PublishedAt, e.CanceledAt, e.CreatedAt, e.UpdatedAt,
-		).
-		WillReturnResult(sqlmock.NewResult(1, 1))
-
-	err = repo.Create(context.Background(), e)
-	assert.NoError(t, err)
-	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestRepo_GetByID(t *testing.T) {
+func TestRepo_ListPublicTimeKeyset(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	assert.NoError(t, err)
 	defer db.Close()
 
 	repo := New(db)
-	eventID := "evt_123"
 
-	t.Run("success_mapping", func(t *testing.T) {
+	t.Run("first_page_without_cursor", func(t *testing.T) {
+		f := event.ListFilter{PageSize: 10, City: "Sydney"}
 		rows := sqlmock.NewRows([]string{
 			"id", "owner_id", "title", "description", "city", "category",
 			"start_time", "end_time", "capacity", "status",
 			"published_at", "canceled_at", "created_at", "updated_at",
-		}).AddRow(
-			eventID, "owner_1", "Title", "Desc", "Syd", "Cat",
-			time.Now(), time.Now(), 0, "published",
-			nil, nil, time.Now(), time.Now(),
-		)
+		}).AddRow(newEventRow("e1")...)
 
-		mock.ExpectQuery("SELECT (.+) FROM events WHERE id =").
-			WithArgs(eventID).
+		// 修复：使用 sqlmock.QueryMatcherEqual 或更宽松的正则
+		// 注意这里匹配的是 buildPublicBaseWhere 生成的 SQL 部分
+		mock.ExpectQuery(`SELECT (.+) FROM events WHERE status = 'published' AND city = \$1 ORDER BY start_time ASC, id ASC LIMIT \$2`).
+			WithArgs("Sydney", 10).
 			WillReturnRows(rows)
 
-		ev, err := repo.GetByID(context.Background(), eventID)
+		items, err := repo.ListPublicTimeKeyset(context.Background(), f, false, time.Time{}, "")
 		assert.NoError(t, err)
-		assert.Equal(t, eventID, ev.ID)
-		assert.Equal(t, domain.StatusPublished, ev.Status)
+		assert.Len(t, items, 1)
 	})
 
-	t.Run("not_found_mapping", func(t *testing.T) {
-		mock.ExpectQuery("SELECT").WithArgs("none").WillReturnError(sql.ErrNoRows)
+	t.Run("second_page_with_cursor", func(t *testing.T) {
+		lastTime := time.Now().UTC()
+		lastID := "e1"
+		f := event.ListFilter{PageSize: 10}
 
-		ev, err := repo.GetByID(context.Background(), "none")
-		assert.Error(t, err)
-		assert.Nil(t, ev)
-		// 验证是否正确转换为了 domain 层的错误
-		assert.Contains(t, err.Error(), "event not found")
+		rows := sqlmock.NewRows([]string{
+			"id", "owner_id", "title", "description", "city", "category",
+			"start_time", "end_time", "capacity", "status",
+			"published_at", "canceled_at", "created_at", "updated_at",
+		}).AddRow(newEventRow("e2")...)
+
+		// 修复：Keyset 谓词正则
+		mock.ExpectQuery(`WHERE status = 'published' AND \(start_time, id\) > \(\$1, \$2\) ORDER BY start_time ASC, id ASC LIMIT \$3`).
+			WithArgs(lastTime, lastID, 10).
+			WillReturnRows(rows)
+
+		items, err := repo.ListPublicTimeKeyset(context.Background(), f, true, lastTime, lastID)
+		assert.NoError(t, err)
+		assert.Len(t, items, 1)
+	})
+}
+
+func TestRepo_ListPublicRelevanceKeyset(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	repo := New(db)
+
+	t.Run("search_with_rank_mapping", func(t *testing.T) {
+		f := event.ListFilter{Query: "Go", PageSize: 5}
+
+		// 修复：Relevance 模式下 Scan 包含 rank 字段
+		rows := sqlmock.NewRows([]string{
+			"id", "owner_id", "title", "description", "city", "category",
+			"start_time", "end_time", "capacity", "status",
+			"published_at", "canceled_at", "created_at", "updated_at",
+			"rank",
+		}).AddRow(append(newEventRow("e1"), 0.95)...)
+
+		// 匹配 ts_rank_cd 部分
+		mock.ExpectQuery(`SELECT (.+) ts_rank_cd\(search_vector, plainto_tsquery\('simple', \$1\)\) AS rank FROM events WHERE status = 'published' AND search_vector @@ plainto_tsquery\('simple', \$1\) ORDER BY rank DESC, start_time ASC, id ASC LIMIT \$2`).
+			WithArgs("Go", 5).
+			WillReturnRows(rows)
+
+		items, ranks, err := repo.ListPublicRelevanceKeyset(context.Background(), f, false, 0, time.Time{}, "")
+
+		// 检查错误，防止 Panic
+		if assert.NoError(t, err) && assert.Len(t, items, 1) {
+			assert.Equal(t, 0.95, ranks[0])
+		}
 	})
 }

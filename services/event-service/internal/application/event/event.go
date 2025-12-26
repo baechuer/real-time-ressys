@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	EventVersion  = "v1"
+	EventVersion  = 1
 	EventProducer = "event-service"
 )
 
@@ -47,10 +47,11 @@ type EventCanceledPayload struct {
 }
 
 // ---- trace id plumbing ----
-// Keep this minimal and decoupled: if transport layer stores a request id in context,
+// Minimal and decoupled: if transport layer stores a request id in context,
 // we read it here. If not present, trace_id will be omitted.
 //
-// You can align the key with your existing middleware later.
+// NOTE: You can later align this with chi middleware key if you want,
+// but keeping it local avoids importing transport/middleware packages here.
 type ctxKey string
 
 const ctxRequestID ctxKey = "request_id"

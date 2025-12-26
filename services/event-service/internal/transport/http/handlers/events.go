@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -26,23 +27,17 @@ func NewEventsHandler(svc *event.Service, clock Clock) *EventsHandler {
 	return &EventsHandler{svc: svc, clock: clock}
 }
 
+// -------------------------
 // Public
+// -------------------------
+
 func (h *EventsHandler) ListPublic(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	page, _ := strconv.Atoi(q.Get("page"))
+
+	// page is legacy (offset). We keep it for compatibility but ignore it for keyset behavior.
+	_, _ = strconv.Atoi(q.Get("page"))
+
 	pageSize, _ := strconv.Atoi(q.Get("page_size"))
-	sort := q.Get("sort")
-	switch sort {
-	case "", "time", "popularity":
-	default:
-		response.Err(w, r, domain.ErrValidationMeta("invalid query param", map[string]string{
-			"sort": "must be one of: time, popularity",
-		}))
-		return
-	}
-	if page <= 0 {
-		page = 1
-	}
 	if pageSize <= 0 {
 		pageSize = 20
 	}
@@ -50,9 +45,13 @@ func (h *EventsHandler) ListPublic(w http.ResponseWriter, r *http.Request) {
 		pageSize = 100
 	}
 
+	sort := strings.TrimSpace(q.Get("sort"))
+	cursor := strings.TrimSpace(q.Get("cursor"))
+
+	// time range
 	var fromPtr, toPtr *time.Time
-	if v := q.Get("from"); v != "" {
-		t, err := time.Parse(time.RFC3339, v)
+	if v := strings.TrimSpace(q.Get("from")); v != "" {
+		t, err := parseRFC3339OrNano(v)
 		if err != nil {
 			response.Err(w, r, domain.ErrValidationMeta("invalid query param", map[string]string{
 				"from": "must be RFC3339 timestamp",
@@ -62,14 +61,12 @@ func (h *EventsHandler) ListPublic(w http.ResponseWriter, r *http.Request) {
 		tt := t.UTC()
 		fromPtr = &tt
 	}
-
-	if v := q.Get("to"); v != "" {
-		t, err := time.Parse(time.RFC3339, v)
+	if v := strings.TrimSpace(q.Get("to")); v != "" {
+		t, err := parseRFC3339OrNano(v)
 		if err != nil {
-			response.Err(w, r, domain.ErrValidationMeta(
-				"invalid query param",
-				map[string]string{"to": "must be RFC3339"},
-			))
+			response.Err(w, r, domain.ErrValidationMeta("invalid query param", map[string]string{
+				"to": "must be RFC3339 timestamp",
+			}))
 			return
 		}
 		tt := t.UTC()
@@ -82,27 +79,29 @@ func (h *EventsHandler) ListPublic(w http.ResponseWriter, r *http.Request) {
 		Category: q.Get("category"),
 		From:     fromPtr,
 		To:       toPtr,
-		Page:     page,
 		PageSize: pageSize,
 		Sort:     sort,
+		Cursor:   cursor,
 	}
 
-	items, total, err := h.svc.ListPublic(r.Context(), filter)
+	res, err := h.svc.ListPublic(r.Context(), filter)
 	if err != nil {
 		response.Err(w, r, err)
 		return
 	}
+
 	now := h.clock.Now().UTC()
-	out := make([]dto.EventResp, 0, len(items))
-	for _, it := range items {
+	out := make([]dto.EventResp, 0, len(res.Items))
+	for _, it := range res.Items {
 		out = append(out, dto.ToEventResp(it, now))
 	}
 
 	response.Data(w, http.StatusOK, dto.PageResp[dto.EventResp]{
-		Items:    out,
-		Page:     filter.Page,
-		PageSize: filter.PageSize,
-		Total:    total,
+		Items:      out,
+		NextCursor: res.NextCursor,
+		Page:       1,
+		PageSize:   filter.PageSize,
+		Total:      0, // keyset 模式建议不返回 total（避免 count 慢）
 	})
 }
 
@@ -114,25 +113,30 @@ func (h *EventsHandler) GetPublic(w http.ResponseWriter, r *http.Request) {
 		}))
 		return
 	}
+
 	ev, err := h.svc.GetPublic(r.Context(), id)
 	if err != nil {
 		response.Err(w, r, err)
 		return
 	}
+
 	now := h.clock.Now().UTC()
 	response.Data(w, http.StatusOK, dto.ToEventResp(ev, now))
 }
 
+// -------------------------
 // Organizer
+// -------------------------
+
 func (h *EventsHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req dto.CreateEventReq
 	if err := validate.DecodeJSON(r, &req); err != nil {
-		// If validate.DecodeJSON returns plain error, wrap it as validation_error
 		response.Err(w, r, domain.ErrValidationMeta("invalid json body", map[string]string{
 			"body": "malformed JSON or invalid fields",
 		}))
 		return
 	}
+
 	cmd := event.CreateCmd{
 		ActorID:     middleware.UserID(r),
 		ActorRole:   middleware.Role(r),
@@ -144,11 +148,13 @@ func (h *EventsHandler) Create(w http.ResponseWriter, r *http.Request) {
 		EndTime:     req.EndTime,
 		Capacity:    req.Capacity,
 	}
+
 	ev, err := h.svc.Create(r.Context(), cmd)
 	if err != nil {
 		response.Err(w, r, err)
 		return
 	}
+
 	now := h.clock.Now().UTC()
 	response.Data(w, http.StatusCreated, dto.ToEventResp(ev, now))
 }
@@ -250,6 +256,7 @@ func (h *EventsHandler) ListMine(w http.ResponseWriter, r *http.Request) {
 		response.Err(w, r, err)
 		return
 	}
+
 	now := h.clock.Now().UTC()
 	out := make([]dto.EventResp, 0, len(items))
 	for _, it := range items {
@@ -262,4 +269,12 @@ func (h *EventsHandler) ListMine(w http.ResponseWriter, r *http.Request) {
 		PageSize: pageSize,
 		Total:    total,
 	})
+}
+
+func parseRFC3339OrNano(s string) (time.Time, error) {
+	// accept both RFC3339 and RFC3339Nano
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		return t, nil
+	}
+	return time.Parse(time.RFC3339, s)
 }

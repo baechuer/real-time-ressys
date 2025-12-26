@@ -112,11 +112,9 @@ LIMIT $2 OFFSET $3
 	return out, total, nil
 }
 
+// ListPublic is now "legacy compatibility": it returns ONLY the first page (OFFSET=0).
+// Your real endpoint should be using keyset pagination via ListPublicTimeKeyset / ListPublicRelevanceKeyset.
 func (r *Repo) ListPublic(ctx context.Context, f event.ListFilter) ([]*domain.Event, int, error) {
-	// Defensive pagination (handler already does it, but keep repo safe too)
-	if f.Page <= 0 {
-		f.Page = 1
-	}
 	if f.PageSize <= 0 {
 		f.PageSize = 20
 	}
@@ -124,20 +122,19 @@ func (r *Repo) ListPublic(ctx context.Context, f event.ListFilter) ([]*domain.Ev
 		f.PageSize = 100
 	}
 
-	// Public list: only published (draft must never leak)
+	city := strings.TrimSpace(f.City)
+	category := strings.TrimSpace(f.Category)
+	query := strings.TrimSpace(f.Query)
+
 	where := []string{"status = 'published'"}
 	args := []any{}
 	argN := 1
 
-	add := func(cond string, val any) {
-		where = append(where, fmt.Sprintf(cond, argN))
+	add := func(condFmt string, val any) {
+		where = append(where, fmt.Sprintf(condFmt, argN))
 		args = append(args, val)
 		argN++
 	}
-
-	city := strings.TrimSpace(f.City)
-	category := strings.TrimSpace(f.Category)
-	query := strings.TrimSpace(f.Query)
 
 	if city != "" {
 		add("city = $%d", city)
@@ -151,37 +148,27 @@ func (r *Repo) ListPublic(ctx context.Context, f event.ListFilter) ([]*domain.Ev
 	if f.To != nil {
 		add("start_time <= $%d", *f.To)
 	}
+
+	// FTS
 	if query != "" {
-		like := "%" + query + "%"
-		// use two params for title/description
-		where = append(where, fmt.Sprintf("(title ILIKE $%d OR description ILIKE $%d)", argN, argN+1))
-		args = append(args, like, like)
-		argN += 2
+		where = append(where, fmt.Sprintf("search_vector @@ plainto_tsquery('simple', $%d)", argN))
+		args = append(args, query)
+		argN++
 	}
 
 	whereSQL := "WHERE " + strings.Join(where, " AND ")
 
-	// count
+	// count (optional)
 	countSQL := "SELECT COUNT(*) FROM events " + whereSQL
 	var total int
 	if err := r.db.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 
-	// sort whitelist (never concatenate arbitrary user input)
-	orderBy := "start_time ASC"
-	switch strings.TrimSpace(f.Sort) {
-	case "", "time":
-		orderBy = "start_time ASC"
-	case "popularity":
-		// Not supported yet (depends on join/feed). Fallback to time.
-		orderBy = "start_time ASC"
-	default:
-		// unknown sort -> fallback to time (or you can validate earlier in handler)
-		orderBy = "start_time ASC"
-	}
+	// deterministic order
+	orderBy := "start_time ASC, id ASC"
 
-	offset := (f.Page - 1) * f.PageSize
+	offset := 0
 
 	listSQL := `
 SELECT id, owner_id, title, description, city, category,

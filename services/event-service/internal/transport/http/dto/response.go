@@ -33,8 +33,9 @@ type EventResp struct {
 }
 
 type PageResp[T any] struct {
-	Items    []T `json:"items"`
-	Page     int `json:"page"`
-	PageSize int `json:"page_size"`
-	Total    int `json:"total"`
+	Items      []T    `json:"items"`
+	Page       int    `json:"page"`
+	PageSize   int    `json:"page_size"`
+	Total      int    `json:"total"`
+	NextCursor string `json:"next_cursor,omitempty"`
 }

@@ -20,6 +20,7 @@ type stubClock struct{}
 func (stubClock) Now() time.Time { return time.Date(2025, 12, 26, 12, 0, 0, 0, time.UTC) }
 
 // stubRepo prevents nil pointer panic in service
+// stubRepo prevents nil pointer panic in service
 type stubRepo struct{}
 
 func (s *stubRepo) Create(ctx context.Context, e *domain.Event) error { return nil }
@@ -30,16 +31,53 @@ func (s *stubRepo) Update(ctx context.Context, e *domain.Event) error { return n
 func (s *stubRepo) ListPublic(ctx context.Context, f event.ListFilter) ([]*domain.Event, int, error) {
 	return []*domain.Event{}, 0, nil
 }
+
+// Added: Missing method to satisfy event.EventRepo interface
+func (s *stubRepo) ListPublicAfter(
+	ctx context.Context,
+	f event.ListFilter,
+	afterRank float64,
+	afterStart time.Time,
+	afterID string,
+) ([]*domain.Event, int, string, error) {
+	return []*domain.Event{}, 0, "", nil
+}
+
 func (s *stubRepo) ListByOwner(ctx context.Context, o string, p, ps int) ([]*domain.Event, int, error) {
 	return []*domain.Event{}, 0, nil
 }
 
+func (s *stubRepo) ListPublicTimeKeyset(
+	ctx context.Context,
+	f event.ListFilter,
+	hasCursor bool,
+	afterStart time.Time,
+	afterID string,
+) ([]*domain.Event, error) {
+	return []*domain.Event{}, nil
+}
+
+func (s *stubRepo) ListPublicRelevanceKeyset(
+	ctx context.Context,
+	f event.ListFilter,
+	hasCursor bool,
+	afterRank float64,
+	afterStart time.Time,
+	afterID string,
+) ([]*domain.Event, []float64, error) {
+	return []*domain.Event{}, []float64{}, nil
+}
+
+// Mock Publisher for Router Test
+type stubPub struct{}
+
+func (s stubPub) PublishEvent(ctx context.Context, routingKey string, payload any) error { return nil }
 func TestRouter_Routing(t *testing.T) {
 	auth := authmw.NewAuth("secret", "issuer")
 
-	// Initialize with stubs instead of nil
 	clock := stubClock{}
-	svc := event.New(&stubRepo{}, clock, nil)
+	// Updated: Use stubPub instead of nil to satisfy EventPublisher interface
+	svc := event.New(&stubRepo{}, clock, stubPub{})
 	h := handlers.NewEventsHandler(svc, clock)
 	z := handlers.NewHealthHandler()
 

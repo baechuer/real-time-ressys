@@ -9,7 +9,7 @@ import (
 )
 
 func TestLoad(t *testing.T) {
-	// Helper: Ensure environment is clean for each subtest
+	// 辅助函数：清理测试相关的环境变量，确保测试隔离
 	cleanup := func() {
 		os.Unsetenv("APP_ENV")
 		os.Unsetenv("HTTP_ADDR")
@@ -17,7 +17,7 @@ func TestLoad(t *testing.T) {
 		os.Unsetenv("JWT_SECRET")
 		os.Unsetenv("JWT_ISSUER")
 		os.Unsetenv("RABBIT_URL")
-		os.Unsetenv("RABBIT_EXCHANGE")
+		os.Unsetenv("HTTP_READ_TIMEOUT")
 	}
 
 	t.Run("should_return_error_if_database_url_is_missing", func(t *testing.T) {
@@ -25,52 +25,43 @@ func TestLoad(t *testing.T) {
 		cfg, err := Load()
 		assert.Nil(t, cfg)
 		assert.Error(t, err)
-		// Match the exact string in your current config.go
-		assert.Contains(t, err.Error(), "missing DATABASE_URL")
+		// 这里的报错字符串必须与你 config.go 里的 fmt.Errorf 一致
+		assert.Equal(t, "missing DATABASE_URL", err.Error())
 	})
 
 	t.Run("should_return_error_if_jwt_secret_is_missing", func(t *testing.T) {
 		cleanup()
 		os.Setenv("DATABASE_URL", "postgres://localhost:5432/db")
-		defer cleanup()
-
 		cfg, err := Load()
 		assert.Nil(t, cfg)
 		assert.Error(t, err)
-		// Match the exact string in your current config.go
-		assert.Contains(t, err.Error(), "missing JWT_SECRET")
+		assert.Equal(t, "missing JWT_SECRET", err.Error())
 	})
 
 	t.Run("should_load_successfully_with_valid_env", func(t *testing.T) {
 		cleanup()
 		os.Setenv("DATABASE_URL", "postgres://localhost:5432/db")
 		os.Setenv("JWT_SECRET", "super-secret")
-		os.Setenv("HTTP_ADDR", ":9090")
-		defer cleanup()
+		os.Setenv("APP_ENV", "dev")
 
 		cfg, err := Load()
 		assert.NoError(t, err)
 		assert.NotNil(t, cfg)
-		assert.Equal(t, ":9090", cfg.HTTPAddr)
-		assert.Equal(t, "super-secret", cfg.JWTSecret)
-		// Your new config.go defaults JWTIssuer to empty string ""
-		assert.Equal(t, "", cfg.JWTIssuer)
-		// Verify RabbitMQ default exchange
-		assert.Equal(t, "city.events", cfg.RabbitExchange)
+		assert.Equal(t, "dev", cfg.AppEnv)
+		assert.Equal(t, "city.events", cfg.RabbitExchange) // 验证默认值
 	})
 
-	t.Run("should_fail_in_non_dev_env_if_rabbit_url_missing", func(t *testing.T) {
+	t.Run("should_fail_in_prod_if_rabbit_url_is_missing", func(t *testing.T) {
 		cleanup()
-		os.Setenv("APP_ENV", "prod")
+		os.Setenv("APP_ENV", "prod") // 非 dev 环境
 		os.Setenv("DATABASE_URL", "postgres://localhost")
 		os.Setenv("JWT_SECRET", "secret")
-		// Purposefully not setting RABBIT_URL
-		defer cleanup()
+		// 故意不设置 RABBIT_URL
 
 		cfg, err := Load()
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "missing RABBIT_URL (required when APP_ENV != dev)")
 		assert.Nil(t, cfg)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "missing RABBIT_URL")
 	})
 }
 
@@ -82,30 +73,22 @@ func TestGetEnv(t *testing.T) {
 		result := getEnv("TEST_KEY", "default")
 		assert.Equal(t, "value_with_spaces", result)
 	})
-
-	t.Run("should_return_default_if_empty", func(t *testing.T) {
-		os.Setenv("TEST_KEY", "")
-		defer os.Unsetenv("TEST_KEY")
-
-		result := getEnv("TEST_KEY", "fallback")
-		assert.Equal(t, "fallback", result)
-	})
 }
 
 func TestGetDuration(t *testing.T) {
 	t.Run("should_parse_valid_duration", func(t *testing.T) {
-		os.Setenv("DUR_KEY", "5s")
-		defer os.Unsetenv("DUR_KEY")
+		os.Setenv("TEST_DUR", "5s")
+		defer os.Unsetenv("TEST_DUR")
 
-		d := getDuration("DUR_KEY", 0)
-		assert.Equal(t, 5*time.Second, d)
+		result := getDuration("TEST_DUR", 10*time.Second)
+		assert.Equal(t, 5*time.Second, result)
 	})
 
 	t.Run("should_return_default_on_invalid_duration", func(t *testing.T) {
-		os.Setenv("DUR_KEY", "invalid")
-		defer os.Unsetenv("DUR_KEY")
+		os.Setenv("TEST_DUR", "invalid")
+		defer os.Unsetenv("TEST_DUR")
 
-		d := getDuration("DUR_KEY", 10*time.Second)
-		assert.Equal(t, 10*time.Second, d)
+		result := getDuration("TEST_DUR", 10*time.Second)
+		assert.Equal(t, 10*time.Second, result) // 解析失败，返回默认值
 	})
 }

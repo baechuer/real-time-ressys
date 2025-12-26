@@ -117,3 +117,39 @@ func doJSON(t *testing.T, method, url, token string, body any) (int, Envelope) {
 	_ = json.NewDecoder(resp.Body).Decode(&env)
 	return resp.StatusCode, env
 }
+
+// ... 现有的 helpers_test.go 代码 ...
+
+// createAndPublish 辅助函数：快速创建一个已发布的活动用于测试
+func createAndPublish(t *testing.T, e Env, title, desc string) string {
+	t.Helper()
+
+	body := map[string]any{
+		"title":       title,
+		"description": desc,
+		"city":        "Sydney",
+		"category":    "test",
+		"start_time":  time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339),
+		"end_time":    time.Now().UTC().Add(25 * time.Hour).Format(time.RFC3339),
+		"capacity":    100,
+	}
+
+	code, env := doJSON(t, "POST", e.BaseURL+"/event/v1/events", e.UserToken, body)
+	if code != 201 {
+		t.Fatalf("create failed: %d", code)
+	}
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(env.Data, &created); err != nil {
+		t.Fatalf("unmarshal created id failed: %v", err)
+	}
+
+	code, _ = doJSON(t, "POST", e.BaseURL+"/event/v1/events/"+created.ID+"/publish", e.UserToken, nil)
+	if code != 200 {
+		t.Fatalf("publish failed: %d", code)
+	}
+
+	return created.ID
+}
