@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/baechuer/real-time-ressys/services/event-service/internal/domain"
+	zlog "github.com/rs/zerolog/log"
 )
 
 type ListFilter struct {
@@ -65,6 +66,27 @@ func (s *Service) ListPublic(ctx context.Context, f ListFilter) (PublicListResul
 		return PublicListResult{}, err
 	}
 
+	// --- Caching Strategy: Only Cache "First Page" ---
+	// "First Page" definition: No cursor.
+	// We ignore PageSize variations in the "cache logic" check, but include it in the key.
+	isFirstPage := f.Cursor == ""
+	cacheKey := ""
+
+	if isFirstPage && s.cache != nil {
+		cacheKey = cacheKeyPublicList(f)
+		var cached PublicListResult
+		found, err := s.cache.Get(ctx, cacheKey, &cached)
+		if err != nil {
+			zlog.Warn().Err(err).Str("key", cacheKey).Msg("cache list get failed")
+		} else if found {
+			zlog.Debug().Str("key", cacheKey).Msg("cache list hit")
+			return cached, nil
+		}
+	}
+
+	// --- DB Logic ---
+	var res PublicListResult
+
 	switch f.Sort {
 	case "time":
 		afterStart, afterID, hasCursor, err := parseTimeCursorOrEmpty(f.Cursor)
@@ -81,7 +103,7 @@ func (s *Service) ListPublic(ctx context.Context, f ListFilter) (PublicListResul
 			last := items[len(items)-1]
 			next = formatTimeCursor(last.StartTime.UTC(), last.ID)
 		}
-		return PublicListResult{Items: items, NextCursor: next}, nil
+		res = PublicListResult{Items: items, NextCursor: next}
 
 	case "relevance":
 		afterRank, afterStart, afterID, hasCursor, err := parseRelevanceCursorOrEmpty(f.Cursor)
@@ -99,11 +121,20 @@ func (s *Service) ListPublic(ctx context.Context, f ListFilter) (PublicListResul
 			lastRank := ranks[len(ranks)-1]
 			next = formatRelevanceCursor(lastRank, last.StartTime.UTC(), last.ID)
 		}
-		return PublicListResult{Items: items, NextCursor: next}, nil
+		res = PublicListResult{Items: items, NextCursor: next}
 
 	default:
 		return PublicListResult{}, domain.ErrValidation("unsupported sort")
 	}
+
+	// --- Set Cache ---
+	if isFirstPage && s.cache != nil && len(res.Items) > 0 {
+		if err := s.cache.Set(ctx, cacheKey, res, s.ttlList); err != nil {
+			zlog.Warn().Err(err).Str("key", cacheKey).Msg("cache list set failed")
+		}
+	}
+
+	return res, nil
 }
 
 func (s *Service) ListMyEvents(ctx context.Context, actorID, actorRole string, page, pageSize int) ([]*domain.Event, int, error) {

@@ -37,3 +37,18 @@ type EventRepo interface {
 type EventPublisher interface {
 	PublishEvent(ctx context.Context, routingKey string, payload any) error
 }
+
+// Cache defines the behavior for caching (Redis)
+type Cache interface {
+	// Get attempts to retrieve a value.
+	// Returns (found=true, nil) if hit.
+	// Returns (found=false, nil) if miss (not an error).
+	// Returns (false, err) if connection error / redis down.
+	Get(ctx context.Context, key string, dest any) (bool, error)
+
+	// Set saves a value with TTL.
+	Set(ctx context.Context, key string, val any, ttl time.Duration) error
+
+	// Delete removes keys.
+	Delete(ctx context.Context, keys ...string) error
+}

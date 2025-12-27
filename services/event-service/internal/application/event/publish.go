@@ -41,6 +41,15 @@ func (s *Service) Publish(ctx context.Context, eventID, actorID, actorRole strin
 		return nil, err
 	}
 
+	// --- Cache Invalidation ---
+	// Delete detail cache so next GetPublic fetches fresh data
+	if s.cache != nil {
+		key := cacheKeyEventDetails(ev.ID)
+		if err := s.cache.Delete(ctx, key); err != nil {
+			zlog.Warn().Err(err).Str("key", key).Msg("cache invalidate failed")
+		}
+	}
+
 	// --- MQ domain event (best-effort) ---
 	if s.pub != nil {
 		env := DomainEventEnvelope[EventPublishedPayload]{

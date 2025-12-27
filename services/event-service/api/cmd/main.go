@@ -12,12 +12,14 @@ import (
 
 	"github.com/baechuer/real-time-ressys/services/event-service/internal/application/event"
 	"github.com/baechuer/real-time-ressys/services/event-service/internal/config"
+	"github.com/baechuer/real-time-ressys/services/event-service/internal/infrastructure/caching/redis"
 	"github.com/baechuer/real-time-ressys/services/event-service/internal/infrastructure/db/postgres"
 	rabbitpub "github.com/baechuer/real-time-ressys/services/event-service/internal/infrastructure/messaging/rabbitmq"
 	"github.com/baechuer/real-time-ressys/services/event-service/internal/logger"
 	"github.com/baechuer/real-time-ressys/services/event-service/internal/transport/http/handlers"
 	authmw "github.com/baechuer/real-time-ressys/services/event-service/internal/transport/http/middleware"
 	"github.com/baechuer/real-time-ressys/services/event-service/internal/transport/http/router"
+	go_redis "github.com/redis/go-redis/v9"
 	zlog "github.com/rs/zerolog/log"
 )
 
@@ -32,16 +34,19 @@ type App struct {
 	Server *http.Server
 	DB     *sql.DB
 
-	Publisher *rabbitpub.Publisher
+	Publisher  *rabbitpub.Publisher
+	RedisCache *redis.Client
 }
 
 func main() {
-	logger.Init()
-
+	// 1. Load Config first (so .env is loaded)
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	// 2. Initialize Logger (now it can see LOG_LEVEL from .env)
+	logger.Init()
 
 	u, _ := url.Parse(cfg.DatabaseURL)
 	zlog.Info().
@@ -69,6 +74,9 @@ func main() {
 		if app.Publisher != nil {
 			_ = app.Publisher.Close()
 		}
+		if app.RedisCache != nil {
+			_ = app.RedisCache.Close()
+		}
 	}()
 
 	zlog.Info().Str("addr", cfg.HTTPAddr).Msg("listening")
@@ -77,11 +85,11 @@ func main() {
 	}
 }
 
+// ... 前面部分保持不变 ...
+
 func NewApp(cfg *config.Config, db *sql.DB) *App {
-	// 1) Infrastructure
 	repo := postgres.New(db)
 
-	// publisher wiring
 	var rabbit *rabbitpub.Publisher
 	var pub event.EventPublisher = event.NoopPublisher{}
 
@@ -92,23 +100,33 @@ func NewApp(cfg *config.Config, db *sql.DB) *App {
 		}
 		rabbit = p
 		pub = p
-		zlog.Info().Str("exchange", cfg.RabbitExchange).Msg("rabbit publisher ready")
-	} else {
-		zlog.Warn().Msg("RABBIT_URL empty: domain events will not be published")
 	}
 
-	// 2) Application
-	svc := event.New(repo, sysClock{}, pub)
+	// redis wiring
+	var rc *redis.Client // 我们的包装器
+	var cache event.Cache
+	var rawRedisInstance *go_redis.Client // 官方实例
 
-	// 3) Transport
+	if cfg.RedisURL != "" {
+		c, err := redis.New(cfg.RedisURL) // 调用自定义包
+		if err != nil {
+			zlog.Warn().Err(err).Msg("redis connect failed")
+		} else {
+			rc = c
+			cache = c
+			rawRedisInstance = c.GetRawClient() // 获取官方底层实例
+			zlog.Info().Msg("redis cache ready")
+		}
+	}
+
+	svc := event.New(repo, sysClock{}, pub, cache, cfg.CacheTTLDetails, cfg.CacheTTLList)
 	h := handlers.NewEventsHandler(svc, sysClock{})
 	auth := authmw.NewAuth(cfg.JWTSecret, cfg.JWTIssuer)
 	z := handlers.NewHealthHandler()
 
-	// 4) Router
-	httpHandler := router.New(h, auth, z)
+	// 注入官方 Redis 实例供限流使用
+	httpHandler := router.New(h, auth, z, rawRedisInstance, cfg)
 
-	// 5) Server
 	srv := &http.Server{
 		Addr:         cfg.HTTPAddr,
 		Handler:      httpHandler,
@@ -118,9 +136,10 @@ func NewApp(cfg *config.Config, db *sql.DB) *App {
 	}
 
 	return &App{
-		Config:    cfg,
-		Server:    srv,
-		DB:        db,
-		Publisher: rabbit,
+		Config:     cfg,
+		Server:     srv,
+		DB:         db,
+		Publisher:  rabbit,
+		RedisCache: rc,
 	}
 }

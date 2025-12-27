@@ -11,11 +11,34 @@ import (
 
 // --- Mocks & Helpers ---
 
-// NoopPublisher satisfies the EventPublisher interface defined in ports.go
-
 type fakeClock struct{ t time.Time }
 
 func (c fakeClock) Now() time.Time { return c.t }
+
+// Mock Cache
+type mockCache struct {
+	store map[string]any
+}
+
+func newMockCache() *mockCache { return &mockCache{store: make(map[string]any)} }
+
+func (m *mockCache) Get(ctx context.Context, key string, dest any) (bool, error) {
+	// For testing simplistic scenarios
+	// In real tests with reflection, dest needs to be set.
+	// Here we just return miss to keep tests passing without complex reflection logic for now.
+	// Or we can stub it if needed.
+	return false, nil
+}
+func (m *mockCache) Set(ctx context.Context, key string, val any, ttl time.Duration) error {
+	m.store[key] = val
+	return nil
+}
+func (m *mockCache) Delete(ctx context.Context, keys ...string) error {
+	for _, k := range keys {
+		delete(m.store, k)
+	}
+	return nil
+}
 
 type memRepo struct {
 	byID map[string]*domain.Event
@@ -39,11 +62,6 @@ func (m *memRepo) GetByID(ctx context.Context, id string) (*domain.Event, error)
 func (m *memRepo) Update(ctx context.Context, e *domain.Event) error {
 	m.byID[e.ID] = e
 	return nil
-}
-
-// FIXED: Satisfies legacy ListPublic method
-func (m *memRepo) ListPublic(ctx context.Context, f ListFilter) ([]*domain.Event, int, error) {
-	return []*domain.Event{}, 0, nil
 }
 
 // FIXED: Satisfies Keyset pagination ListPublicTimeKeyset
@@ -83,7 +101,8 @@ func mustTime(t *testing.T, s string) time.Time {
 func TestService_Cancel_Success(t *testing.T) {
 	now := mustTime(t, "2025-12-25T10:00:00Z")
 	repo := newMemRepo()
-	svc := New(repo, fakeClock{t: now}, NoopPublisher{})
+	// Update New() signature
+	svc := New(repo, fakeClock{t: now}, NoopPublisher{}, newMockCache(), 0, 0)
 
 	eventID := "evt_123"
 	ownerID := "user_A"
@@ -111,7 +130,7 @@ func TestService_Cancel_Success(t *testing.T) {
 func TestService_Publish_Validation(t *testing.T) {
 	now := mustTime(t, "2025-12-25T10:00:00Z")
 	repo := newMemRepo()
-	svc := New(repo, fakeClock{t: now}, NoopPublisher{})
+	svc := New(repo, fakeClock{t: now}, NoopPublisher{}, newMockCache(), 0, 0)
 
 	t.Run("cannot_publish_with_start_time_in_past", func(t *testing.T) {
 		eventID := "evt_past"
@@ -132,7 +151,7 @@ func TestService_Publish_Validation(t *testing.T) {
 func TestService_ListPublic_CursorLogic(t *testing.T) {
 	now := mustTime(t, "2025-12-25T10:00:00Z")
 	repo := newMemRepo()
-	svc := New(repo, fakeClock{t: now}, NoopPublisher{})
+	svc := New(repo, fakeClock{t: now}, NoopPublisher{}, newMockCache(), 0, 0)
 
 	t.Run("time_sort_without_cursor", func(t *testing.T) {
 		f := ListFilter{Sort: "time"}

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/baechuer/real-time-ressys/services/event-service/internal/domain"
+	zlog "github.com/rs/zerolog/log"
 )
 
 type UpdateCmd struct {
@@ -34,19 +35,21 @@ func (s *Service) Update(ctx context.Context, cmd UpdateCmd) (*domain.Event, err
 		return nil, domain.ErrInvalidState("canceled event cannot be updated")
 	}
 
-	// if cmd.Title != nil { ev.Title = *cmd.Title } ...
-
-	if !ev.EndTime.After(ev.StartTime) {
-		return nil, domain.ErrValidationMeta("invalid time range", map[string]string{
-			"end_time": "must be after start_time",
-		})
+	if err := ev.ApplyUpdate(cmd.Title, cmd.Description, cmd.City, cmd.Category, cmd.StartTime, cmd.EndTime, cmd.Capacity, s.clock.Now()); err != nil {
+		return nil, err
 	}
-
-	now := s.clock.Now().UTC()
-	ev.UpdatedAt = now
 
 	if err := s.repo.Update(ctx, ev); err != nil {
 		return nil, err
 	}
+
+	// --- Cache Invalidation ---
+	if s.cache != nil {
+		key := cacheKeyEventDetails(ev.ID)
+		if err := s.cache.Delete(ctx, key); err != nil {
+			zlog.Warn().Err(err).Str("key", key).Msg("cache invalidate failed")
+		}
+	}
+
 	return ev, nil
 }

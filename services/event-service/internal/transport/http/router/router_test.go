@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/baechuer/real-time-ressys/services/event-service/internal/application/event"
+	"github.com/baechuer/real-time-ressys/services/event-service/internal/config" // 必须导入 config
 	"github.com/baechuer/real-time-ressys/services/event-service/internal/domain"
 	"github.com/baechuer/real-time-ressys/services/event-service/internal/transport/http/handlers"
 	authmw "github.com/baechuer/real-time-ressys/services/event-service/internal/transport/http/middleware"
@@ -19,8 +20,6 @@ type stubClock struct{}
 
 func (stubClock) Now() time.Time { return time.Date(2025, 12, 26, 12, 0, 0, 0, time.UTC) }
 
-// stubRepo prevents nil pointer panic in service
-// stubRepo prevents nil pointer panic in service
 type stubRepo struct{}
 
 func (s *stubRepo) Create(ctx context.Context, e *domain.Event) error { return nil }
@@ -28,20 +27,6 @@ func (s *stubRepo) GetByID(ctx context.Context, id string) (*domain.Event, error
 	return &domain.Event{}, nil
 }
 func (s *stubRepo) Update(ctx context.Context, e *domain.Event) error { return nil }
-func (s *stubRepo) ListPublic(ctx context.Context, f event.ListFilter) ([]*domain.Event, int, error) {
-	return []*domain.Event{}, 0, nil
-}
-
-// Added: Missing method to satisfy event.EventRepo interface
-func (s *stubRepo) ListPublicAfter(
-	ctx context.Context,
-	f event.ListFilter,
-	afterRank float64,
-	afterStart time.Time,
-	afterID string,
-) ([]*domain.Event, int, string, error) {
-	return []*domain.Event{}, 0, "", nil
-}
 
 func (s *stubRepo) ListByOwner(ctx context.Context, o string, p, ps int) ([]*domain.Event, int, error) {
 	return []*domain.Event{}, 0, nil
@@ -72,16 +57,22 @@ func (s *stubRepo) ListPublicRelevanceKeyset(
 type stubPub struct{}
 
 func (s stubPub) PublishEvent(ctx context.Context, routingKey string, payload any) error { return nil }
+
 func TestRouter_Routing(t *testing.T) {
 	auth := authmw.NewAuth("secret", "issuer")
 
 	clock := stubClock{}
-	// Updated: Use stubPub instead of nil to satisfy EventPublisher interface
-	svc := event.New(&stubRepo{}, clock, stubPub{})
+	// Pass nil for Cache
+	svc := event.New(&stubRepo{}, clock, stubPub{}, nil, 0, 0)
 	h := handlers.NewEventsHandler(svc, clock)
 	z := handlers.NewHealthHandler()
 
-	r := New(h, auth, z)
+	cfg := &config.Config{
+		RLEnabled: false,
+	}
+
+	//handlers, authMiddleware, healthHandler, redisClient(nil), config
+	r := New(h, auth, z, nil, cfg)
 
 	t.Run("public_route_returns_200", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/event/v1/events", nil)
@@ -89,7 +80,6 @@ func TestRouter_Routing(t *testing.T) {
 
 		r.ServeHTTP(rr, req)
 
-		// This should no longer be 500 (panic)
 		assert.Equal(t, http.StatusOK, rr.Code)
 	})
 

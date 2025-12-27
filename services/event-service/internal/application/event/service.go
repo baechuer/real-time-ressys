@@ -11,15 +11,37 @@ type Clock interface{ Now() time.Time }
 
 type Service struct {
 	repo  EventRepo
-	pub   EventPublisher // NEW
+	pub   EventPublisher
+	cache Cache // NEW
 	clock Clock
+
+	// Config for TTLs
+	ttlDetails time.Duration
+	ttlList    time.Duration
 }
 
-func New(repo EventRepo, clock Clock, pub EventPublisher) *Service {
+func New(
+	repo EventRepo,
+	clock Clock,
+	pub EventPublisher,
+	cache Cache,
+	ttlDetails, ttlList time.Duration,
+) *Service {
+	// Defaults if 0
+	if ttlDetails == 0 {
+		ttlDetails = 5 * time.Minute
+	}
+	if ttlList == 0 {
+		ttlList = 15 * time.Second
+	}
+
 	return &Service{
-		repo:  repo,
-		pub:   pub,
-		clock: clock,
+		repo:       repo,
+		pub:        pub,
+		cache:      cache,
+		clock:      clock,
+		ttlDetails: ttlDetails,
+		ttlList:    ttlList,
 	}
 }
 

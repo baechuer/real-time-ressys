@@ -31,6 +31,14 @@ func (s *Service) Cancel(ctx context.Context, eventID, actorID, actorRole string
 		return nil, err
 	}
 
+	// --- Cache Invalidation ---
+	if s.cache != nil {
+		key := cacheKeyEventDetails(ev.ID)
+		if err := s.cache.Delete(ctx, key); err != nil {
+			zlog.Warn().Err(err).Str("key", key).Msg("cache invalidate failed")
+		}
+	}
+
 	// --- MQ domain event (best-effort) ---
 	if s.pub != nil {
 		env := DomainEventEnvelope[EventCanceledPayload]{

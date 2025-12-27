@@ -48,6 +48,10 @@ type Deps struct {
 	Health HealthHandler
 	Auth   AuthHandler
 
+	// ---- 基础追踪中间件 ----
+	RequestIDMW func(http.Handler) http.Handler // 新增：Request ID 追踪
+
+	// ---- 权限中间件 ----
 	AuthMW  func(http.Handler) http.Handler
 	ModMW   func(http.Handler) http.Handler
 	AdminMW func(http.Handler) http.Handler
@@ -68,11 +72,15 @@ type Deps struct {
 }
 
 func New(deps Deps) (http.Handler, error) {
+	// --- 基础校验 ---
 	if deps.Health == nil {
 		return nil, fmt.Errorf("nil Health handler")
 	}
 	if deps.Auth == nil {
 		return nil, fmt.Errorf("nil Auth handler")
+	}
+	if deps.RequestIDMW == nil {
+		return nil, fmt.Errorf("nil RequestID middleware") // 强制要求追踪
 	}
 	if deps.AuthMW == nil {
 		return nil, fmt.Errorf("nil Auth middleware")
@@ -85,6 +93,11 @@ func New(deps Deps) (http.Handler, error) {
 	}
 
 	r := chi.NewRouter()
+
+	// --- 全局中间件 ---
+	// 必须放在最前面，确保后续所有逻辑（包括日志）都能拿到 ID
+	r.Use(deps.RequestIDMW)
+
 	r.Get("/healthz", deps.Health.Healthz)
 
 	r.Route("/auth/v1", func(r chi.Router) {
@@ -116,7 +129,7 @@ func New(deps Deps) (http.Handler, error) {
 		r.With(deps.AuthMW).Get("/me", deps.Auth.Me)
 		r.With(deps.AuthMW).Get("/me/status", deps.Auth.MeStatus)
 
-		// You already mount admin below; keeping this is fine
+		// 权限管理
 		r.With(deps.AuthMW, deps.AdminMW).Get("/admin", deps.Auth.Admin)
 
 		// --- Moderation (account-level) ---
@@ -151,7 +164,6 @@ func New(deps Deps) (http.Handler, error) {
 		} else {
 			r.Post("/verify-email/request", deps.Auth.VerifyEmailRequest)
 		}
-		//r.Get("/verify-email/confirm", deps.Auth.VerifyEmailConfirmGET) // ?token=...
 		r.Post("/verify-email/confirm", deps.Auth.VerifyEmailConfirmPOST)
 
 		// --- Password reset ---
@@ -161,7 +173,7 @@ func New(deps Deps) (http.Handler, error) {
 			r.Post("/password/reset/request", deps.Auth.PasswordResetRequest)
 		}
 		r.Post("/password/reset/confirm", deps.Auth.PasswordResetConfirm)
-		r.Get("/password/reset/validate", deps.Auth.PasswordResetValidate) // ?token=...
+		r.Get("/password/reset/validate", deps.Auth.PasswordResetValidate)
 
 		// --- Account / session management ---
 		if deps.RLPasswordChange != nil {

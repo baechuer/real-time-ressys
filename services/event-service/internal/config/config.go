@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,8 +19,19 @@ type Config struct {
 	JWTSecret string
 	JWTIssuer string
 
+	// RabbitMQ
 	RabbitURL      string
 	RabbitExchange string
+
+	// Redis & Caching
+	RedisURL        string
+	CacheTTLDetails time.Duration // GetPublic
+	CacheTTLList    time.Duration // ListPublic (First Page)
+
+	// Rate Limiting
+	RLEnabled bool
+	RLLimit   int
+	RLWindow  time.Duration
 
 	LogLevel  string
 	LogFormat string
@@ -30,6 +42,7 @@ type Config struct {
 }
 
 func Load() (*Config, error) {
+	// 加载 .env 文件到环境变量中
 	_ = godotenv.Load()
 
 	cfg := &Config{}
@@ -43,6 +56,15 @@ func Load() (*Config, error) {
 
 	cfg.RabbitURL = getEnv("RABBIT_URL", "")
 	cfg.RabbitExchange = getEnv("RABBIT_EXCHANGE", "city.events")
+
+	cfg.RedisURL = getEnv("REDIS_URL", "redis://localhost:6379/0")
+	cfg.CacheTTLDetails = getDuration("CACHE_TTL_DETAILS", 5*time.Minute)
+	cfg.CacheTTLList = getDuration("CACHE_TTL_LIST", 15*time.Second)
+
+	// Rate Limiting Defaults: 100 reqs / 1 min
+	cfg.RLEnabled = getEnv("RL_ENABLED", "true") == "true"
+	cfg.RLLimit = getIntEnv("RL_IP_LIMIT", 100)
+	cfg.RLWindow = getDuration("RL_IP_WINDOW", 1*time.Minute)
 
 	cfg.LogLevel = getEnv("LOG_LEVEL", "info")
 	cfg.LogFormat = getEnv("LOG_FORMAT", "console")
@@ -84,4 +106,16 @@ func getDuration(key string, def time.Duration) time.Duration {
 		return def
 	}
 	return d
+}
+
+func getIntEnv(key string, def int) int {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
+	}
+	i, err := strconv.Atoi(v)
+	if err != nil {
+		return def
+	}
+	return i
 }
