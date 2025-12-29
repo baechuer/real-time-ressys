@@ -8,7 +8,6 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// Client 是我们自定义的包装器
 type Client struct {
 	rdb *redis.Client
 }
@@ -33,7 +32,6 @@ func (c *Client) Close() error {
 	return c.rdb.Close()
 }
 
-// GetRawClient 返回底层的 go-redis 实例，用于 httprate
 func (c *Client) GetRawClient() *redis.Client {
 	return c.rdb
 }

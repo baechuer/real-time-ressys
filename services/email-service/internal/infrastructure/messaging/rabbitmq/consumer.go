@@ -384,7 +384,7 @@ func (c *Consumer) handleDelivery(ctx context.Context, d amqp.Delivery) error {
 			return c.toFinalDLQ(ctx, d, "bad_json", err)
 		}
 
-		// ✅ 改写邮件链接到 8090（不改 MQ payload）
+		// ✅ Rewrite email link to 8090 (don't change MQ payload)
 		link := c.rewriteURL(rk, evt.URL)
 
 		if err := c.handler.VerifyEmail(ctx, evt.UserID, evt.Email, link); err != nil {

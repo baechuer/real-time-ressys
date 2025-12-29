@@ -11,8 +11,7 @@ type Clock interface{ Now() time.Time }
 
 type Service struct {
 	repo  EventRepo
-	pub   EventPublisher
-	cache Cache // NEW
+	cache Cache
 	clock Clock
 
 	// Config for TTLs
@@ -23,7 +22,6 @@ type Service struct {
 func New(
 	repo EventRepo,
 	clock Clock,
-	pub EventPublisher,
 	cache Cache,
 	ttlDetails, ttlList time.Duration,
 ) *Service {
@@ -37,7 +35,6 @@ func New(
 
 	return &Service{
 		repo:       repo,
-		pub:        pub,
 		cache:      cache,
 		clock:      clock,
 		ttlDetails: ttlDetails,
@@ -49,20 +46,12 @@ func isUser(role string) bool      { return role == "user" }
 func isModerator(role string) bool { return role == "moderator" }
 func isAdmin(role string) bool     { return role == "admin" }
 
-// MVP: any authenticated user can create/manage own events.
-// Moderator/Admin can manage others' events.
-func canCreate(role string) bool {
-	return isUser(role) || isModerator(role) || isAdmin(role)
-}
-
-func canEdit(ownerID, actorID, actorRole string) bool {
-	if actorID == "" {
+func canCreate(actorRole string) bool {
+	actorRole = strings.TrimSpace(actorRole)
+	if actorRole == "" {
 		return false
 	}
-	if actorID == ownerID {
-		return true
-	}
-	return isModerator(actorRole) || isAdmin(actorRole)
+	return actorRole == "organizer" || isModerator(actorRole) || isAdmin(actorRole)
 }
 
 var _ = domain.AppError{}
@@ -72,4 +61,8 @@ func canManage(actorID, actorRole, ownerID string) bool {
 		return true
 	}
 	return strings.TrimSpace(actorID) != "" && actorID == ownerID
+}
+func canEdit(ownerID, actorID, actorRole string) bool {
+	// keep legacy name used across handlers
+	return canManage(actorID, actorRole, ownerID)
 }

@@ -39,13 +39,13 @@ type App struct {
 }
 
 func main() {
-	// 1. Load Config first (so .env is loaded)
+	// 1) Load Config first
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// 2. Initialize Logger (now it can see LOG_LEVEL from .env)
+	// 2) Init logger (your project’s logger.Init() takes no args)
 	logger.Init()
 
 	u, _ := url.Parse(cfg.DatabaseURL)
@@ -85,11 +85,10 @@ func main() {
 	}
 }
 
-// ... 前面部分保持不变 ...
-
 func NewApp(cfg *config.Config, db *sql.DB) *App {
 	repo := postgres.New(db)
 
+	// Rabbit publisher (optional)
 	var rabbit *rabbitpub.Publisher
 	var pub event.EventPublisher = event.NoopPublisher{}
 
@@ -100,31 +99,38 @@ func NewApp(cfg *config.Config, db *sql.DB) *App {
 		}
 		rabbit = p
 		pub = p
+
+		// ✅ Start outbox worker only when RabbitMQ is configured
+		// Outbox worker will publish pending rows using stable message_id.
+		repo.StartOutboxWorker(context.Background(), pub)
 	}
 
-	// redis wiring
-	var rc *redis.Client // 我们的包装器
-	var cache event.Cache
-	var rawRedisInstance *go_redis.Client // 官方实例
+	// Redis wiring
+	var rc *redis.Client                  // your wrapper
+	var cache event.Cache                 // used by application caching
+	var rawRedisInstance *go_redis.Client // used by rate limit middleware/router
 
 	if cfg.RedisURL != "" {
-		c, err := redis.New(cfg.RedisURL) // 调用自定义包
+		c, err := redis.New(cfg.RedisURL)
 		if err != nil {
 			zlog.Warn().Err(err).Msg("redis connect failed")
 		} else {
 			rc = c
 			cache = c
-			rawRedisInstance = c.GetRawClient() // 获取官方底层实例
+			rawRedisInstance = c.GetRawClient()
 			zlog.Info().Msg("redis cache ready")
 		}
 	}
 
-	svc := event.New(repo, sysClock{}, pub, cache, cfg.CacheTTLDetails, cfg.CacheTTLList)
+	// ✅ IMPORTANT: event.New signature changed (publisher removed).
+	// Publishing is now done via outbox worker, not in request path.
+	svc := event.New(repo, sysClock{}, cache, cfg.CacheTTLDetails, cfg.CacheTTLList)
+
 	h := handlers.NewEventsHandler(svc, sysClock{})
 	auth := authmw.NewAuth(cfg.JWTSecret, cfg.JWTIssuer)
 	z := handlers.NewHealthHandler()
 
-	// 注入官方 Redis 实例供限流使用
+	// router uses rawRedisInstance for middleware (if any)
 	httpHandler := router.New(h, auth, z, rawRedisInstance, cfg)
 
 	srv := &http.Server{

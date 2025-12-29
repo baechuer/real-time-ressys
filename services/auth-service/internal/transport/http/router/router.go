@@ -48,10 +48,10 @@ type Deps struct {
 	Health HealthHandler
 	Auth   AuthHandler
 
-	// ---- 基础追踪中间件 ----
-	RequestIDMW func(http.Handler) http.Handler // 新增：Request ID 追踪
+	// ---- Base tracing middleware ----
+	RequestIDMW func(http.Handler) http.Handler // Added: Request ID tracing
 
-	// ---- 权限中间件 ----
+	// ---- Authorization middleware ----
 	AuthMW  func(http.Handler) http.Handler
 	ModMW   func(http.Handler) http.Handler
 	AdminMW func(http.Handler) http.Handler
@@ -72,7 +72,7 @@ type Deps struct {
 }
 
 func New(deps Deps) (http.Handler, error) {
-	// --- 基础校验 ---
+	// --- Base validation ---
 	if deps.Health == nil {
 		return nil, fmt.Errorf("nil Health handler")
 	}
@@ -80,7 +80,7 @@ func New(deps Deps) (http.Handler, error) {
 		return nil, fmt.Errorf("nil Auth handler")
 	}
 	if deps.RequestIDMW == nil {
-		return nil, fmt.Errorf("nil RequestID middleware") // 强制要求追踪
+		return nil, fmt.Errorf("nil RequestID middleware") // Required for tracing
 	}
 	if deps.AuthMW == nil {
 		return nil, fmt.Errorf("nil Auth middleware")
@@ -94,8 +94,8 @@ func New(deps Deps) (http.Handler, error) {
 
 	r := chi.NewRouter()
 
-	// --- 全局中间件 ---
-	// 必须放在最前面，确保后续所有逻辑（包括日志）都能拿到 ID
+	// --- Global middleware ---
+	// Must be first to ensure all subsequent logic (including logging) gets the ID
 	r.Use(deps.RequestIDMW)
 
 	r.Get("/healthz", deps.Health.Healthz)
@@ -129,7 +129,7 @@ func New(deps Deps) (http.Handler, error) {
 		r.With(deps.AuthMW).Get("/me", deps.Auth.Me)
 		r.With(deps.AuthMW).Get("/me/status", deps.Auth.MeStatus)
 
-		// 权限管理
+		// Permission management
 		r.With(deps.AuthMW, deps.AdminMW).Get("/admin", deps.Auth.Admin)
 
 		// --- Moderation (account-level) ---

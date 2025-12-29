@@ -2,19 +2,19 @@ package rabbitmq
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
+	"strings"
 	"sync"
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
-	zlog "github.com/rs/zerolog/log"
 )
 
 const (
-	defaultExchange = "city.events"
-	publishWait     = 150 * time.Millisecond
+	DefaultExchange = "city.events"
+
+	// Wait window for Return / Confirm
+	publishWait = 150 * time.Millisecond
 )
 
 type Publisher struct {
@@ -31,28 +31,26 @@ type Publisher struct {
 }
 
 func NewPublisher(url, exchange string) (*Publisher, error) {
-	if url == "" {
-		return nil, errors.New("missing rabbit url")
-	}
 	if exchange == "" {
-		exchange = defaultExchange
+		exchange = DefaultExchange
 	}
+
 	p := &Publisher{
 		url:      url,
 		exchange: exchange,
 	}
-	if err := p.connectLocked(); err != nil {
+	if err := p.connect(); err != nil {
 		return nil, err
 	}
 	return p, nil
 }
 
-func (p *Publisher) connectLocked() error {
-	// caller must hold p.mu or be in constructor before concurrent use
+func (p *Publisher) connect() error {
 	conn, err := amqp.Dial(p.url)
 	if err != nil {
 		return err
 	}
+
 	ch, err := conn.Channel()
 	if err != nil {
 		_ = conn.Close()
@@ -66,12 +64,12 @@ func (p *Publisher) connectLocked() error {
 		return err
 	}
 
-	// small buffered chans
+	p.conn = conn
+	p.ch = ch
+
 	p.confirmCh = ch.NotifyPublish(make(chan amqp.Confirmation, 1))
 	p.returnCh = ch.NotifyReturn(make(chan amqp.Return, 1))
 
-	p.conn = conn
-	p.ch = ch
 	return nil
 }
 
@@ -90,79 +88,53 @@ func (p *Publisher) Close() error {
 	return nil
 }
 
-// PublishEvent implements application port: event.EventPublisher
-func (p *Publisher) PublishEvent(ctx context.Context, routingKey string, payload any) error {
+// PublishEvent publishes a JSON-encoded envelope body to the topic exchange with mandatory + confirms.
+// IMPORTANT: messageID MUST be stable across retries (outbox.message_id).
+func (p *Publisher) PublishEvent(ctx context.Context, routingKey, messageID string, body []byte) error {
 	if routingKey == "" {
 		return errors.New("missing routingKey")
 	}
-
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-
-	// If caller didn't set a deadline, keep our own small window.
-	if _, ok := ctx.Deadline(); !ok {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, 2*time.Second)
-		defer cancel()
+	if strings.TrimSpace(messageID) == "" {
+		return errors.New("missing messageID")
 	}
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// lazily reconnect if needed
-	if p.ch == nil || p.conn == nil || p.conn.IsClosed() {
-		_ = p.Close()
-		if err := p.connectLocked(); err != nil {
-			return fmt.Errorf("rabbit reconnect failed: %w", err)
-		}
+	if p.ch == nil {
+		return errors.New("publisher channel not ready")
 	}
 
-	pub := amqp.Publishing{
-		ContentType:  "application/json",
-		Body:         body,
-		DeliveryMode: amqp.Persistent,
-		Timestamp:    time.Now().UTC(),
-	}
-
-	// mandatory=true -> NO_ROUTE surfaces in returnCh
-	if err := p.ch.PublishWithContext(ctx, p.exchange, routingKey, true, false, pub); err != nil {
+	err := p.ch.PublishWithContext(
+		ctx,
+		p.exchange,
+		routingKey,
+		true,  // mandatory
+		false, // immediate
+		amqp.Publishing{
+			MessageId:   messageID,
+			ContentType: "application/json",
+			Timestamp:   time.Now().UTC(),
+			Body:        body,
+		},
+	)
+	if err != nil {
 		return err
 	}
 
-	timer := time.NewTimer(publishWait)
-	defer timer.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			// If caller cancels / deadline, bubble up
-			return ctx.Err()
-
-		case ret := <-p.returnCh:
-			// NOTE: ReplyCode is uint16 in amqp091-go
-			zlog.Error().
-				Str("exchange", p.exchange).
-				Str("rk", routingKey).
-				Int("code", int(ret.ReplyCode)).
-				Str("reason", ret.ReplyText).
-				Msg("rabbit publish returned (mandatory)")
-			return fmt.Errorf("rabbit returned: %d %s", ret.ReplyCode, ret.ReplyText)
-
-		case conf := <-p.confirmCh:
-			if !conf.Ack {
-				return errors.New("rabbit publish not acked")
-			}
-			return nil
-
-		case <-timer.C:
-			// best-effort: don't hard-fail business flow on confirm timing
-			zlog.Warn().
-				Str("exchange", p.exchange).
-				Str("rk", routingKey).
-				Msg("rabbit confirm/return timeout window elapsed")
-			return nil
+	// Wait for either Return (NO_ROUTE) or Confirm
+	select {
+	case ret := <-p.returnCh:
+		return errors.New("NO_ROUTE: " + ret.RoutingKey)
+	case conf := <-p.confirmCh:
+		if !conf.Ack {
+			return errors.New("publish nack")
 		}
+		return nil
+	case <-time.After(publishWait):
+		// best-effort window; if neither arrives, treat as success-attempt (outbox will retry on downstream consumer side anyway)
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }

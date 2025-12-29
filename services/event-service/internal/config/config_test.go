@@ -9,7 +9,6 @@ import (
 )
 
 func TestLoad(t *testing.T) {
-	// 辅助函数：清理测试相关的环境变量，确保测试隔离
 	cleanup := func() {
 		os.Unsetenv("APP_ENV")
 		os.Unsetenv("HTTP_ADDR")
@@ -25,7 +24,6 @@ func TestLoad(t *testing.T) {
 		cfg, err := Load()
 		assert.Nil(t, cfg)
 		assert.Error(t, err)
-		// 这里的报错字符串必须与你 config.go 里的 fmt.Errorf 一致
 		assert.Equal(t, "missing DATABASE_URL", err.Error())
 	})
 
@@ -53,10 +51,9 @@ func TestLoad(t *testing.T) {
 
 	t.Run("should_fail_in_prod_if_rabbit_url_is_missing", func(t *testing.T) {
 		cleanup()
-		os.Setenv("APP_ENV", "prod") // 非 dev 环境
+		os.Setenv("APP_ENV", "prod")
 		os.Setenv("DATABASE_URL", "postgres://localhost")
 		os.Setenv("JWT_SECRET", "secret")
-		// 故意不设置 RABBIT_URL
 
 		cfg, err := Load()
 		assert.Nil(t, cfg)
@@ -89,6 +86,6 @@ func TestGetDuration(t *testing.T) {
 		defer os.Unsetenv("TEST_DUR")
 
 		result := getDuration("TEST_DUR", 10*time.Second)
-		assert.Equal(t, 10*time.Second, result) // 解析失败，返回默认值
+		assert.Equal(t, 10*time.Second, result)
 	})
 }

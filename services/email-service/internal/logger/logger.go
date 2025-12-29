@@ -36,7 +36,7 @@ func InitWithWriter(w io.Writer) {
 	// ---- time format ----
 	timeFormat := strings.TrimSpace(os.Getenv("LOG_TIME_FORMAT"))
 	if timeFormat == "" {
-		// auth-service 常用 RFC3339 或 RFC3339Nano；你现在是 RFC3339
+		// auth-service RFC3339
 		timeFormat = time.RFC3339
 	}
 
@@ -50,7 +50,6 @@ func InitWithWriter(w io.Writer) {
 			Out:        w,
 			TimeFormat: timeFormat,
 		}
-		// Windows/CI 很多时候不想要颜色
 		if strings.TrimSpace(os.Getenv("LOG_COLOR")) == "0" {
 			cw.NoColor = true
 		}

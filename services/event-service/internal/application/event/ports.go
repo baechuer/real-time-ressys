@@ -32,10 +32,33 @@ type EventRepo interface {
 		afterStart time.Time,
 		afterID string,
 	) ([]*domain.Event, []float64, error)
+
+	// WithTx runs fn in a DB transaction.
+	// The TxEventRepo must be used for all reads/writes inside the callback.
+	WithTx(ctx context.Context, fn func(r TxEventRepo) error) error
 }
 
+type TxEventRepo interface {
+	GetByIDForUpdate(ctx context.Context, id string) (*domain.Event, error)
+	Update(ctx context.Context, e *domain.Event) error
+
+	// InsertOutbox persists the message for eventual publish (Outbox pattern).
+	InsertOutbox(ctx context.Context, msg OutboxMessage) error
+}
+
+// EventPublisher is used by the outbox worker (infrastructure layer).
+// It MUST set AMQP MessageId = msg.MessageID and publish msg.Body as-is.
 type EventPublisher interface {
-	PublishEvent(ctx context.Context, routingKey string, payload any) error
+	PublishEvent(ctx context.Context, routingKey, messageID string, body []byte) error
+}
+
+// OutboxMessage is what we persist in the outbox table.
+// Body MUST be a JSON-encoded DomainEventEnvelope.
+type OutboxMessage struct {
+	MessageID  string
+	RoutingKey string
+	Body       []byte
+	CreatedAt  time.Time
 }
 
 // Cache defines the behavior for caching (Redis)

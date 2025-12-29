@@ -17,30 +17,21 @@ import (
 type mockClock struct{ t time.Time }
 
 func (m mockClock) Now() time.Time { return m.t }
-func (m *mockRepo) ListPublicAfter(
-	ctx context.Context,
-	f event.ListFilter,
-	afterRank float64,
-	afterStart time.Time,
-	afterID string,
-) ([]*domain.Event, int, string, error) {
-	return []*domain.Event{}, 0, "", nil
-}
 
+// TestEventsHandler_GetPublic
 func TestEventsHandler_GetPublic(t *testing.T) {
 	// 1. Setup
 	now := time.Now().UTC()
-	// Note: In a real scenario, you'd use a Mock for the service.
-	// Here we use the real service with a memory repo for simplicity.
 	repo := &mockRepo{}
-	// Pass nil for Cache
-	svc := event.New(repo, mockClock{t: now}, nil, nil, 0, 0)
+
+	// FIX: event.New requires (Repo, Clock, Cache, ttlDetails, ttlList)
+	// We pass nil for cache and 0 for durations to use defaults
+	svc := event.New(repo, mockClock{t: now}, nil, 0, 0)
 	h := NewEventsHandler(svc, mockClock{t: now})
 
 	t.Run("return_400_on_invalid_uuid", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/events/invalid-uuid", nil)
 
-		// Setup chi context because we use chi.URLParam
 		rctx := chi.NewRouteContext()
 		rctx.URLParams.Add("event_id", "invalid-uuid")
 		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
@@ -53,7 +44,7 @@ func TestEventsHandler_GetPublic(t *testing.T) {
 	})
 }
 
-// Minimal mock repo for handler testing
+// Full mock repo satisfying the event.EventRepo interface
 type mockRepo struct{}
 
 func (m *mockRepo) Create(ctx context.Context, e *domain.Event) error { return nil }
@@ -61,28 +52,36 @@ func (m *mockRepo) GetByID(ctx context.Context, id string) (*domain.Event, error
 	if id == "not-found" {
 		return nil, domain.ErrNotFound("not found")
 	}
-	return &domain.Event{ID: id, Status: domain.StatusPublished}, nil
+	return &domain.Event{
+		ID:        id,
+		Status:    domain.StatusPublished,
+		StartTime: time.Now().Add(time.Hour),
+		EndTime:   time.Now().Add(2 * time.Hour),
+	}, nil
 }
 func (m *mockRepo) Update(ctx context.Context, e *domain.Event) error { return nil }
-func (m *mockRepo) ListPublicTimeKeyset(
-	ctx context.Context,
-	f event.ListFilter,
-	hasCursor bool,
-	afterStart time.Time,
-	afterID string,
-) ([]*domain.Event, error) {
-	return []*domain.Event{}, nil
-}
-func (m *mockRepo) ListPublicRelevanceKeyset(
-	ctx context.Context,
-	f event.ListFilter,
-	hasCursor bool,
-	afterRank float64,
-	afterStart time.Time,
-	afterID string,
-) ([]*domain.Event, []float64, error) {
-	return []*domain.Event{}, []float64{}, nil
-}
 func (m *mockRepo) ListByOwner(ctx context.Context, ownerID string, page, pageSize int) ([]*domain.Event, int, error) {
 	return nil, 0, nil
 }
+
+// Satisfy Keyset pagination requirements
+func (m *mockRepo) ListPublicTimeKeyset(ctx context.Context, f event.ListFilter, hasCursor bool, afterStart time.Time, afterID string) ([]*domain.Event, error) {
+	return []*domain.Event{}, nil
+}
+
+func (m *mockRepo) ListPublicRelevanceKeyset(ctx context.Context, f event.ListFilter, hasCursor bool, afterRank float64, afterStart time.Time, afterID string) ([]*domain.Event, []float64, error) {
+	return []*domain.Event{}, []float64{}, nil
+}
+
+// Satisfy Transaction requirements
+func (m *mockRepo) WithTx(ctx context.Context, fn func(r event.TxEventRepo) error) error {
+	return fn(&mockTxRepo{})
+}
+
+type mockTxRepo struct{}
+
+func (m *mockTxRepo) GetByIDForUpdate(ctx context.Context, id string) (*domain.Event, error) {
+	return &domain.Event{ID: id}, nil
+}
+func (m *mockTxRepo) Update(ctx context.Context, e *domain.Event) error               { return nil }
+func (m *mockTxRepo) InsertOutbox(ctx context.Context, msg event.OutboxMessage) error { return nil }

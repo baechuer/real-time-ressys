@@ -2,59 +2,56 @@ package event
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/baechuer/real-time-ressys/services/event-service/internal/domain"
+	"github.com/google/uuid"
 	zlog "github.com/rs/zerolog/log"
 )
 
 func (s *Service) Publish(ctx context.Context, eventID, actorID, actorRole string) (*domain.Event, error) {
-	ev, err := s.repo.GetByID(ctx, eventID)
-	if err != nil {
-		return nil, err
-	}
+	var out *domain.Event
 
-	if !canManage(actorID, actorRole, ev.OwnerID) {
-		return nil, domain.ErrForbidden("not allowed")
-	}
-
-	switch ev.Status {
-	case domain.StatusCanceled:
-		return nil, domain.ErrInvalidState("event already canceled")
-	case domain.StatusPublished:
-		return nil, domain.ErrInvalidState("event already published")
-	}
-
-	now := s.clock.Now().UTC()
-
-	// MVP rule: cannot publish if start_time is in the past
-	if !ev.StartTime.IsZero() && ev.StartTime.Before(now) {
-		return nil, domain.ErrValidationMeta("invalid start_time", map[string]string{
-			"start_time": "cannot publish event in the past",
-		})
-	}
-
-	ev.Status = domain.StatusPublished
-	ev.PublishedAt = &now
-	ev.UpdatedAt = now
-
-	if err := s.repo.Update(ctx, ev); err != nil {
-		return nil, err
-	}
-
-	// --- Cache Invalidation ---
-	// Delete detail cache so next GetPublic fetches fresh data
-	if s.cache != nil {
-		key := cacheKeyEventDetails(ev.ID)
-		if err := s.cache.Delete(ctx, key); err != nil {
-			zlog.Warn().Err(err).Str("key", key).Msg("cache invalidate failed")
+	err := s.repo.WithTx(ctx, func(r TxEventRepo) error {
+		ev, err := r.GetByIDForUpdate(ctx, eventID)
+		if err != nil {
+			return err
 		}
-	}
 
-	// --- MQ domain event (best-effort) ---
-	if s.pub != nil {
+		if !canManage(actorID, actorRole, ev.OwnerID) {
+			return domain.ErrForbidden("not allowed")
+		}
+
+		switch ev.Status {
+		case domain.StatusCanceled:
+			return domain.ErrInvalidState("event already canceled")
+		case domain.StatusPublished:
+			return domain.ErrInvalidState("event already published")
+		}
+
+		now := s.clock.Now().UTC()
+
+		// MVP rule: cannot publish if start_time is in the past
+		if !ev.StartTime.IsZero() && ev.StartTime.Before(now) {
+			return domain.ErrValidationMeta("invalid start_time", map[string]string{
+				"start_time": "cannot publish event in the past",
+			})
+		}
+
+		ev.Status = domain.StatusPublished
+		ev.PublishedAt = &now
+		ev.UpdatedAt = now
+
+		if err := r.Update(ctx, ev); err != nil {
+			return err
+		}
+
+		// --- Outbox (durable, at-least-once) ---
+		messageID := uuid.NewString()
 		env := DomainEventEnvelope[EventPublishedPayload]{
-			Version:    1,
-			Producer:   "event-service",
+			Version:    EventVersion,
+			Producer:   EventProducer,
+			MessageID:  messageID,
 			TraceID:    TraceIDFromContext(ctx),
 			OccurredAt: now,
 			Payload: EventPublishedPayload{
@@ -69,14 +66,34 @@ func (s *Service) Publish(ctx context.Context, eventID, actorID, actorRole strin
 			},
 		}
 
-		if err := s.pub.PublishEvent(ctx, "event.published", env); err != nil {
-			zlog.Error().
-				Err(err).
-				Str("rk", "event.published").
-				Str("event_id", ev.ID).
-				Msg("publish domain event failed")
+		body, err := json.Marshal(env)
+		if err != nil {
+			return err
+		}
+
+		if err := r.InsertOutbox(ctx, OutboxMessage{
+			MessageID:  messageID,
+			RoutingKey: "event.published",
+			Body:       body,
+			CreatedAt:  now,
+		}); err != nil {
+			return err
+		}
+
+		out = ev
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// --- Cache Invalidation (best-effort, after commit) ---
+	if s.cache != nil && out != nil {
+		key := cacheKeyEventDetails(out.ID)
+		if err := s.cache.Delete(ctx, key); err != nil {
+			zlog.Warn().Err(err).Str("key", key).Msg("cache invalidate failed")
 		}
 	}
 
-	return ev, nil
+	return out, nil
 }

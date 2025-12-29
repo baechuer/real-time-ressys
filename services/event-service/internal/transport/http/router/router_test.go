@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/baechuer/real-time-ressys/services/event-service/internal/application/event"
-	"github.com/baechuer/real-time-ressys/services/event-service/internal/config" // 必须导入 config
+	"github.com/baechuer/real-time-ressys/services/event-service/internal/config"
 	"github.com/baechuer/real-time-ressys/services/event-service/internal/domain"
 	"github.com/baechuer/real-time-ressys/services/event-service/internal/transport/http/handlers"
 	authmw "github.com/baechuer/real-time-ressys/services/event-service/internal/transport/http/middleware"
@@ -20,50 +20,48 @@ type stubClock struct{}
 
 func (stubClock) Now() time.Time { return time.Date(2025, 12, 26, 12, 0, 0, 0, time.UTC) }
 
+// stubRepo must implement all methods of event.EventRepo
 type stubRepo struct{}
 
 func (s *stubRepo) Create(ctx context.Context, e *domain.Event) error { return nil }
 func (s *stubRepo) GetByID(ctx context.Context, id string) (*domain.Event, error) {
-	return &domain.Event{}, nil
+	return &domain.Event{Status: domain.StatusPublished}, nil
 }
 func (s *stubRepo) Update(ctx context.Context, e *domain.Event) error { return nil }
-
 func (s *stubRepo) ListByOwner(ctx context.Context, o string, p, ps int) ([]*domain.Event, int, error) {
 	return []*domain.Event{}, 0, nil
 }
 
-func (s *stubRepo) ListPublicTimeKeyset(
-	ctx context.Context,
-	f event.ListFilter,
-	hasCursor bool,
-	afterStart time.Time,
-	afterID string,
-) ([]*domain.Event, error) {
+func (s *stubRepo) ListPublicTimeKeyset(ctx context.Context, f event.ListFilter, hasCursor bool, afterStart time.Time, afterID string) ([]*domain.Event, error) {
 	return []*domain.Event{}, nil
 }
 
-func (s *stubRepo) ListPublicRelevanceKeyset(
-	ctx context.Context,
-	f event.ListFilter,
-	hasCursor bool,
-	afterRank float64,
-	afterStart time.Time,
-	afterID string,
-) ([]*domain.Event, []float64, error) {
+func (s *stubRepo) ListPublicRelevanceKeyset(ctx context.Context, f event.ListFilter, hasCursor bool, afterRank float64, afterStart time.Time, afterID string) ([]*domain.Event, []float64, error) {
 	return []*domain.Event{}, []float64{}, nil
 }
 
-// Mock Publisher for Router Test
-type stubPub struct{}
+// FIX: Added WithTx to satisfy the EventRepo interface
+func (s *stubRepo) WithTx(ctx context.Context, fn func(r event.TxEventRepo) error) error {
+	return fn(&stubTxRepo{})
+}
 
-func (s stubPub) PublishEvent(ctx context.Context, routingKey string, payload any) error { return nil }
+// stubTxRepo handles transaction-specific repository calls
+type stubTxRepo struct{}
+
+func (s *stubTxRepo) GetByIDForUpdate(ctx context.Context, id string) (*domain.Event, error) {
+	return &domain.Event{}, nil
+}
+func (s *stubTxRepo) Update(ctx context.Context, e *domain.Event) error               { return nil }
+func (s *stubTxRepo) InsertOutbox(ctx context.Context, msg event.OutboxMessage) error { return nil }
 
 func TestRouter_Routing(t *testing.T) {
 	auth := authmw.NewAuth("secret", "issuer")
-
 	clock := stubClock{}
-	// Pass nil for Cache
-	svc := event.New(&stubRepo{}, clock, stubPub{}, nil, 0, 0)
+
+	// FIX: Corrected event.New signature:
+	// want: (repo, clock, cache, ttlDetails, ttlList)
+	svc := event.New(&stubRepo{}, clock, nil, 0, 0)
+
 	h := handlers.NewEventsHandler(svc, clock)
 	z := handlers.NewHealthHandler()
 
@@ -71,7 +69,7 @@ func TestRouter_Routing(t *testing.T) {
 		RLEnabled: false,
 	}
 
-	//handlers, authMiddleware, healthHandler, redisClient(nil), config
+	// New(h, auth, z, rdb, cfg)
 	r := New(h, auth, z, nil, cfg)
 
 	t.Run("public_route_returns_200", func(t *testing.T) {

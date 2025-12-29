@@ -14,9 +14,7 @@ func TestRenderBasicHTML(t *testing.T) {
 
 	htmlOutput := renderBasicHTML(title, "intro", "button", link)
 
-	// 验证 HTML 转义，防止 XSS
 	assert.Contains(t, htmlOutput, "Hello &amp; Welcome")
-	// 验证链接是否正确嵌入
 	assert.Contains(t, htmlOutput, "href=\"https://example.com/verify?token=123\"")
 	assert.Contains(t, htmlOutput, "background:#111")
 }

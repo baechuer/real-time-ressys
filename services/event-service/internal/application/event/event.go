@@ -12,11 +12,12 @@ const (
 )
 
 // DomainEventEnvelope is the stable contract for all domain events emitted by event-service.
-// Consumers should rely on: version/producer/occurred_at + payload.
+// Consumers should rely on: version/producer/message_id/occurred_at + payload.
 // trace_id is optional but strongly recommended for observability.
 type DomainEventEnvelope[T any] struct {
 	Version    int       `json:"version"`
 	Producer   string    `json:"producer"`
+	MessageID  string    `json:"message_id"`
 	TraceID    string    `json:"trace_id,omitempty"`
 	OccurredAt time.Time `json:"occurred_at"`
 	Payload    T         `json:"payload"`

@@ -42,7 +42,7 @@ type Config struct {
 }
 
 func Load() (*Config, error) {
-	// 加载 .env 文件到环境变量中
+	// Load .env file into environment variables
 	_ = godotenv.Load()
 
 	cfg := &Config{}
@@ -81,7 +81,7 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("missing JWT_SECRET")
 	}
 
-	// Rabbit: dev 可空；非 dev 强制
+	// Rabbit: optional for dev; required for others
 	if cfg.AppEnv != "dev" && cfg.RabbitURL == "" {
 		return nil, fmt.Errorf("missing RABBIT_URL (required when APP_ENV != dev)")
 	}

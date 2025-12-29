@@ -16,7 +16,6 @@ type Sender interface {
 	SendPasswordReset(ctx context.Context, toEmail, url string) error
 }
 
-// 你已有 PermanentError / TemporaryError 的话，这里只依赖 Permanent() bool
 type permanentMarker interface{ Permanent() bool }
 
 type IdempotencyStore interface {
@@ -127,8 +126,8 @@ func tokenOrFallback(token, link string) string {
 	return link
 }
 
-// isNonRetriable is optional helper if你想在上层更细分逻辑，这里没强依赖。
-// 留着以防你 sender 返回 PermanentError 时要快速进 DLQ。
+// isNonRetriable is an optional helper if you want to further subdivide logic at the upper layer; there's no strong dependency here.
+// Kept in case you want to quickly enter DLQ when the sender returns a PermanentError.
 func isNonRetriable(err error) bool {
 	if err == nil {
 		return false
