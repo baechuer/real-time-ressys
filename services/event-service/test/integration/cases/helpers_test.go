@@ -60,6 +60,17 @@ func setup(t *testing.T) Env {
 	if err := infra.PingDB(db); err != nil {
 		t.Fatalf("ping db: %v", err)
 	}
+
+	// Clean DB first to ensure migrations apply cleanly
+	if err := infra.WipeDB(db); err != nil {
+		t.Fatalf("wipe db: %v", err)
+	}
+
+	// Apply Migrations
+	if err := infra.ApplyMigrations(db, "../../../migrations"); err != nil {
+		t.Fatalf("apply migrations: %v", err)
+	}
+
 	if err := infra.ResetEvents(db); err != nil {
 		t.Fatalf("reset events: %v", err)
 	}
