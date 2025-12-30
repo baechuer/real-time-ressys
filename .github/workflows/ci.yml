@@ -89,9 +89,32 @@ jobs:
       - name: Integration tests
         working-directory: services/${{ matrix.svc }}
         env:
+          # Common / Default mapping
           IT_PG_DSN: ${{ matrix.pg_dsn }}
           IT_REDIS_ADDR: ${{ matrix.redis_addr }}
           IT_RABBIT_URL: ${{ matrix.rabbit_url }}
+
+          # Service-specific overrides (so we don't have to change Go code)
+          # Join Service
+          TEST_DB_DSN: ${{ matrix.pg_dsn }}
+          TEST_REDIS_ADDR: ${{ matrix.redis_addr }}
+          TEST_RABBIT_URL: ${{ matrix.rabbit_url }}
+
+          # Event Service
+          EVENT_BASE_URL: "http://localhost:8080" # Dummy URL if tests need it, or we might need to spin up the app?
+          # Actually event-service integration tests seem to need DB/Redis/Rabbit envs too, let's see what they are named.
+          DATABASE_URL: ${{ matrix.pg_dsn }}
+          REDIS_ADDR: ${{ matrix.redis_addr }}
+          RABBIT_URL: ${{ matrix.rabbit_url }}
+          
+          # Auth Service
+          # Checks 'config.Load' which uses standard envs + prefixes?
+          # The tests likely use loaded config or specific env vars.
+          # From logs: "failed to connect to `user=user database=postgres`: 127.0.0.1:5432... connection refused"
+          # This implies it's trying to connect to localhost:5432 (default) instead of the port forwarded one (54321).
+          # We need to ensure the app config picks up the matrix ports.
+          PORT: 8081 # avoid conflict?
+          
         run: |
           set -euo pipefail
           # Only run integration tests if the directory exists (sanity check)
