@@ -20,6 +20,7 @@ type Config struct {
 	JWTSecret       string
 	AccessTokenTTL  time.Duration
 	RefreshTokenTTL time.Duration
+	InternalSecret  string
 
 	// Infrastructure
 	DBAddr        string
@@ -56,6 +57,11 @@ func Load() (*Config, error) {
 	cfg.JWTSecret = strings.TrimSpace(os.Getenv("JWT_SECRET"))
 	if cfg.JWTSecret == "" {
 		return nil, fmt.Errorf("missing required env var: JWT_SECRET")
+	}
+
+	cfg.InternalSecret = getEnv("INTERNAL_SECRET_KEY", "dev-secret-key")
+	if cfg.Env == "prod" && cfg.InternalSecret == "dev-secret-key" {
+		return nil, fmt.Errorf("INTERNAL_SECRET_KEY must be set in prod")
 	}
 
 	// optional with defaults

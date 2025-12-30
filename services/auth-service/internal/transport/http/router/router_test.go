@@ -70,7 +70,8 @@ func (a fakeAuth) SessionsRevoke(w http.ResponseWriter, r *http.Request) {
 	a.write(w, 200, "sessions_revoke")
 }
 
-func (a fakeAuth) MeStatus(w http.ResponseWriter, r *http.Request) { a.write(w, 200, "me_status") }
+func (a fakeAuth) MeStatus(w http.ResponseWriter, r *http.Request)        { a.write(w, 200, "me_status") }
+func (a fakeAuth) InternalGetUser(w http.ResponseWriter, r *http.Request) {}
 
 // Middleware helper
 func noopMW(next http.Handler) http.Handler { return next }
@@ -91,7 +92,7 @@ func TestNew_NilHealth_ReturnsError(t *testing.T) {
 		Health:      nil,
 		Auth:        fakeAuth{},
 		RequestIDMW: noopMW,
-		AuthMW:      noopMW, ModMW: noopMW, AdminMW: noopMW,
+		AuthMW:      noopMW, ModMW: noopMW, AdminMW: noopMW, InternalAuthMW: noopMW,
 	})
 	if err == nil {
 		t.Fatalf("expected error, got nil")
@@ -115,7 +116,7 @@ func TestNew_NilMiddlewares_ReturnError(t *testing.T) {
 	_, err := New(Deps{
 		Health: fakeHealth{}, Auth: fakeAuth{},
 		RequestIDMW: noopMW,
-		AuthMW:      nil, ModMW: noopMW, AdminMW: noopMW,
+		AuthMW:      nil, ModMW: noopMW, AdminMW: noopMW, InternalAuthMW: noopMW,
 	})
 	if err == nil {
 		t.Fatalf("expected error for nil AuthMW")
@@ -125,7 +126,7 @@ func TestNew_NilMiddlewares_ReturnError(t *testing.T) {
 	_, err = New(Deps{
 		Health: fakeHealth{}, Auth: fakeAuth{},
 		RequestIDMW: nil,
-		AuthMW:      noopMW, ModMW: noopMW, AdminMW: noopMW,
+		AuthMW:      noopMW, ModMW: noopMW, AdminMW: noopMW, InternalAuthMW: noopMW,
 	})
 	if err == nil {
 		t.Fatalf("expected error for nil RequestIDMW")
@@ -137,7 +138,7 @@ func TestNew_HealthzRoute_Works(t *testing.T) {
 		Health:      fakeHealth{},
 		Auth:        fakeAuth{},
 		RequestIDMW: noopMW,
-		AuthMW:      noopMW, ModMW: noopMW, AdminMW: noopMW,
+		AuthMW:      noopMW, ModMW: noopMW, AdminMW: noopMW, InternalAuthMW: noopMW,
 	})
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
@@ -161,7 +162,7 @@ func TestNew_LoginRoute_DispatchesToHandler(t *testing.T) {
 		Health:      fakeHealth{},
 		Auth:        fakeAuth{},
 		RequestIDMW: noopMW,
-		AuthMW:      noopMW, ModMW: noopMW, AdminMW: noopMW,
+		AuthMW:      noopMW, ModMW: noopMW, AdminMW: noopMW, InternalAuthMW: noopMW,
 	})
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
@@ -182,12 +183,13 @@ func TestNew_LoginRoute_DispatchesToHandler(t *testing.T) {
 
 func TestNew_MeRoute_UsesAuthMW(t *testing.T) {
 	h, err := New(Deps{
-		Health:      fakeHealth{},
-		Auth:        fakeAuth{},
-		RequestIDMW: noopMW,
-		AuthMW:      headerMW("X-AuthMW", "1"),
-		AdminMW:     noopMW,
-		ModMW:       noopMW,
+		Health:         fakeHealth{},
+		Auth:           fakeAuth{},
+		RequestIDMW:    noopMW,
+		AuthMW:         headerMW("X-AuthMW", "1"),
+		AdminMW:        noopMW,
+		ModMW:          noopMW,
+		InternalAuthMW: noopMW,
 	})
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
@@ -208,12 +210,13 @@ func TestNew_MeRoute_UsesAuthMW(t *testing.T) {
 
 func TestNew_AdminRoute_UsesAuthMWAndAdminMW(t *testing.T) {
 	h, err := New(Deps{
-		Health:      fakeHealth{},
-		Auth:        fakeAuth{},
-		RequestIDMW: noopMW,
-		AuthMW:      headerMW("X-AuthMW", "1"),
-		AdminMW:     headerMW("X-AdminMW", "1"),
-		ModMW:       noopMW,
+		Health:         fakeHealth{},
+		Auth:           fakeAuth{},
+		RequestIDMW:    noopMW,
+		AuthMW:         headerMW("X-AuthMW", "1"),
+		AdminMW:        headerMW("X-AdminMW", "1"),
+		ModMW:          noopMW,
+		InternalAuthMW: noopMW,
 	})
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
@@ -234,12 +237,13 @@ func TestNew_AdminRoute_UsesAuthMWAndAdminMW(t *testing.T) {
 
 func TestNew_AdminSubroute_SetRole_UsesAuthMWAndAdminMW(t *testing.T) {
 	h, err := New(Deps{
-		Health:      fakeHealth{},
-		Auth:        fakeAuth{},
-		RequestIDMW: noopMW,
-		AuthMW:      headerMW("X-AuthMW", "1"),
-		AdminMW:     headerMW("X-AdminMW", "1"),
-		ModMW:       noopMW,
+		Health:         fakeHealth{},
+		Auth:           fakeAuth{},
+		RequestIDMW:    noopMW,
+		AuthMW:         headerMW("X-AuthMW", "1"),
+		AdminMW:        headerMW("X-AdminMW", "1"),
+		ModMW:          noopMW,
+		InternalAuthMW: noopMW,
 	})
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)

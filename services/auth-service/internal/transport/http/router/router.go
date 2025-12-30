@@ -42,6 +42,9 @@ type AuthHandler interface {
 
 	// Optional
 	MeStatus(w http.ResponseWriter, r *http.Request)
+
+	// Internal (Service-to-Service)
+	InternalGetUser(w http.ResponseWriter, r *http.Request)
 }
 
 type Deps struct {
@@ -52,9 +55,10 @@ type Deps struct {
 	RequestIDMW func(http.Handler) http.Handler // Added: Request ID tracing
 
 	// ---- Authorization middleware ----
-	AuthMW  func(http.Handler) http.Handler
-	ModMW   func(http.Handler) http.Handler
-	AdminMW func(http.Handler) http.Handler
+	AuthMW         func(http.Handler) http.Handler
+	ModMW          func(http.Handler) http.Handler
+	AdminMW        func(http.Handler) http.Handler
+	InternalAuthMW func(http.Handler) http.Handler
 
 	// ---- Rate limit middlewares (optional; can be nil) ----
 	RLRegister func(http.Handler) http.Handler
@@ -90,6 +94,9 @@ func New(deps Deps) (http.Handler, error) {
 	}
 	if deps.ModMW == nil {
 		return nil, fmt.Errorf("nil Mod middleware")
+	}
+	if deps.InternalAuthMW == nil {
+		return nil, fmt.Errorf("nil InternalAuth middleware")
 	}
 
 	r := chi.NewRouter()
@@ -187,6 +194,12 @@ func New(deps Deps) (http.Handler, error) {
 		} else {
 			r.With(deps.AuthMW).Post("/sessions/revoke", deps.Auth.SessionsRevoke)
 		}
+	})
+
+	// --- Internal Service API (Protected by network isolation) ---
+	r.Route("/internal", func(r chi.Router) {
+		r.Use(deps.InternalAuthMW)
+		r.Get("/users/{id}", deps.Auth.InternalGetUser)
 	})
 
 	return r, nil

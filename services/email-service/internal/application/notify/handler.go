@@ -14,6 +14,7 @@ import (
 type Sender interface {
 	SendVerifyEmail(ctx context.Context, toEmail, url string) error
 	SendPasswordReset(ctx context.Context, toEmail, url string) error
+	SendEventCanceled(ctx context.Context, toEmail, eventID, reason string) error
 }
 
 type permanentMarker interface{ Permanent() bool }
@@ -27,19 +28,25 @@ type IdempotencyStore interface {
 	MarkSent(ctx context.Context, key string, ttl time.Duration) error
 }
 
-type Service struct {
-	sender Sender
-	idem   IdempotencyStore // nil => disabled
-	ttl    time.Duration
-	lg     zerolog.Logger
+type UserResolver interface {
+	GetEmail(ctx context.Context, userID string) (string, error)
 }
 
-func NewService(sender Sender, idem IdempotencyStore, ttl time.Duration, lg zerolog.Logger) *Service {
+type Service struct {
+	sender   Sender
+	resolver UserResolver
+	idem     IdempotencyStore // nil => disabled
+	ttl      time.Duration
+	lg       zerolog.Logger
+}
+
+func NewService(sender Sender, resolver UserResolver, idem IdempotencyStore, ttl time.Duration, lg zerolog.Logger) *Service {
 	return &Service{
-		sender: sender,
-		idem:   idem,
-		ttl:    ttl,
-		lg:     lg.With().Str("component", "notify_service").Logger(),
+		sender:   sender,
+		resolver: resolver,
+		idem:     idem,
+		ttl:      ttl,
+		lg:       lg.With().Str("component", "notify_service").Logger(),
 	}
 }
 

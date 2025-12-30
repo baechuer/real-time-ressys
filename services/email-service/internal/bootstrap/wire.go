@@ -9,6 +9,7 @@ import (
 
 	"github.com/baechuer/real-time-ressys/services/email-service/internal/application/notify"
 	"github.com/baechuer/real-time-ressys/services/email-service/internal/config"
+	"github.com/baechuer/real-time-ressys/services/email-service/internal/infrastructure/client"
 	infraemail "github.com/baechuer/real-time-ressys/services/email-service/internal/infrastructure/email"
 	"github.com/baechuer/real-time-ressys/services/email-service/internal/infrastructure/idempotency"
 	rmq "github.com/baechuer/real-time-ressys/services/email-service/internal/infrastructure/messaging/rabbitmq"
@@ -63,7 +64,10 @@ func NewApp() (*App, func(), error) {
 		log.Info().Msg("redis disabled (idempotency + http rate limit)")
 	}
 
-	notifySvc := notify.NewService(sender, idem, cfg.EmailIdempotencyTTL, log.Logger)
+	// Auth Client (User Resolver)
+	authClient := client.NewAuthClient(cfg.AuthBaseURL, cfg.AuthInternalSecret, log.Logger)
+
+	notifySvc := notify.NewService(sender, authClient, idem, cfg.EmailIdempotencyTTL, log.Logger)
 
 	// Rabbit consumer
 	consumer := rmq.NewConsumer(rmq.Config{

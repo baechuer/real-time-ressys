@@ -218,12 +218,13 @@ func newServer(deps Deps) (*http.Server, func(), error) {
 
 	// 9) router
 	mux, err := deps.NewRouter(router.Deps{
-		RequestIDMW: middleware.RequestID,
-		Auth:        authH,
-		Health:      healthH,
-		AuthMW:      authMW,
-		ModMW:       modMW,
-		AdminMW:     adminMW,
+		RequestIDMW:    middleware.RequestID,
+		Auth:           authH,
+		Health:         healthH,
+		AuthMW:         authMW,
+		ModMW:          modMW,
+		AdminMW:        adminMW,
+		InternalAuthMW: middleware.InternalAuth(cfg.InternalSecret),
 
 		RLRegister:             rl("auth.register", 3, time.Minute),
 		RLLogin:                rl("auth.login", 5, time.Minute),

@@ -20,6 +20,7 @@ import (
 type Handler interface {
 	VerifyEmail(ctx context.Context, userID, email, url string) error
 	PasswordReset(ctx context.Context, userID, email, url string) error
+	EventCanceled(ctx context.Context, eventID, userID, reason, prevStatus string) error
 }
 
 // Publisher is the MQ publish contract used by Consumer.
@@ -405,8 +406,43 @@ func (c *Consumer) handleDelivery(ctx context.Context, d amqp.Delivery) error {
 		}
 		return nil
 
+	case "email.event_canceled":
+		// Payload from join-service:
+		// {"event_id": "...", "user_id": "...", "reason": "...", "prev_status": "..."}
+
+		// We define a struct for this or use map. Let's use a struct.
+		// Since we don't have contracts package imported here, and I don't want to break imports,
+		// I will define a local struct or map. Local struct is safer.
+		type EventCanceledPayload struct {
+			EventID    string `json:"event_id"`
+			UserID     string `json:"user_id"`
+			Reason     string `json:"reason"`
+			PrevStatus string `json:"prev_status"`
+		}
+		var evt EventCanceledPayload
+		if err := json.Unmarshal(d.Body, &evt); err != nil {
+			return c.toFinalDLQ(ctx, d, "bad_json", err)
+		}
+
+		// Validation
+		if evt.EventID == "" || evt.UserID == "" {
+			c.lg.Warn().Msg("email.event_canceled missing fields; dropping")
+			return nil
+		}
+
+		if err := c.handler.EventCanceled(ctx, evt.EventID, evt.UserID, evt.Reason, evt.PrevStatus); err != nil {
+			return c.onHandlerError(ctx, d, err)
+		}
+		return nil
+
 	default:
-		c.lg.Warn().Str("routing_key", rk).Msg("unknown routing key; ack")
+		// HARDENING: Drop (Ack) unknown messages to prevent DLQ flooding (DoS risk).
+		// We do NOT log the body, only the routing key (sanitized).
+		safeRK := truncateString(rk, 100) // Prevent log flooding with massive keys
+		c.lg.Warn().
+			Str("routing_key", safeRK).
+			Str("decision", "drop_ack").
+			Msg("unknown routing key; dropping to prevent head-of-line blocking")
 		return nil
 	}
 }
@@ -608,6 +644,13 @@ func (c *Consumer) closeConn() {
 
 	c.deliveries = nil
 	c.pub = nil
+}
+
+func truncateString(s string, n int) string {
+	if len(s) > n {
+		return s[:n] + "..."
+	}
+	return s
 }
 
 func isPreconditionFailed(err error) bool {

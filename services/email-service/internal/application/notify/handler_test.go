@@ -20,7 +20,7 @@ func TestService_VerifyEmail_IdempotentSkip_DoesNotSend(t *testing.T) {
 	idem := newFakeIdem()
 
 	ttl := 24 * time.Hour
-	svc := NewService(sender, idem, ttl, testLogger())
+	svc := NewService(sender, &FakeUserResolver{Email: "test@example.com"}, idem, ttl, testLogger())
 
 	link := "http://localhost:8090/verify?token=abc"
 	key := "email:verify:abc"
@@ -47,7 +47,7 @@ func TestService_VerifyEmail_SeenError_ReturnsErrorAndDoesNotSend(t *testing.T) 
 	idem := newFakeIdem()
 	idem.SetSeenErr(errBoom)
 
-	svc := NewService(sender, idem, 24*time.Hour, testLogger())
+	svc := NewService(sender, &FakeUserResolver{Email: "test@example.com"}, idem, 24*time.Hour, testLogger())
 
 	link := "http://localhost:8090/verify?token=abc"
 	err := svc.VerifyEmail(ctx, "u1", "a@b.com", link)
@@ -69,7 +69,7 @@ func TestService_VerifyEmail_SendSuccess_ThenMarkSuccess(t *testing.T) {
 	idem := newFakeIdem()
 
 	ttl := 2 * time.Hour
-	svc := NewService(sender, idem, ttl, testLogger())
+	svc := NewService(sender, &FakeUserResolver{Email: "test@example.com"}, idem, ttl, testLogger())
 
 	link := "http://localhost:8090/verify?token=abc"
 	key := "email:verify:abc"
@@ -101,7 +101,7 @@ func TestService_VerifyEmail_SendTemporaryError_ReturnsError_NoMark(t *testing.T
 	sender.SetVerifyErr(TemporaryError{msg: "temp"})
 	idem := newFakeIdem()
 
-	svc := NewService(sender, idem, 24*time.Hour, testLogger())
+	svc := NewService(sender, &FakeUserResolver{Email: "test@example.com"}, idem, 24*time.Hour, testLogger())
 
 	link := "http://localhost:8090/verify?token=abc"
 	err := svc.VerifyEmail(ctx, "u1", "a@b.com", link)
@@ -123,7 +123,7 @@ func TestService_VerifyEmail_SendPermanentError_ReturnsError_NoMark(t *testing.T
 	sender.SetVerifyErr(PermanentError{msg: "perm"})
 	idem := newFakeIdem()
 
-	svc := NewService(sender, idem, 24*time.Hour, testLogger())
+	svc := NewService(sender, &FakeUserResolver{Email: "test@example.com"}, idem, 24*time.Hour, testLogger())
 
 	link := "http://localhost:8090/verify?token=abc"
 	err := svc.VerifyEmail(ctx, "u1", "a@b.com", link)
@@ -145,7 +145,7 @@ func TestService_VerifyEmail_SendSuccess_MarkFails_ReturnsNil(t *testing.T) {
 	idem := newFakeIdem()
 	idem.SetMarkErr(errBoom)
 
-	svc := NewService(sender, idem, 24*time.Hour, testLogger())
+	svc := NewService(sender, &FakeUserResolver{Email: "test@example.com"}, idem, 24*time.Hour, testLogger())
 
 	link := "http://localhost:8090/verify?token=abc"
 	err := svc.VerifyEmail(ctx, "u1", "a@b.com", link)
@@ -165,7 +165,7 @@ func TestService_PasswordReset_IdempotentSkip_DoesNotSend(t *testing.T) {
 
 	sender := &fakeSender{}
 	idem := newFakeIdem()
-	svc := NewService(sender, idem, 24*time.Hour, testLogger())
+	svc := NewService(sender, &FakeUserResolver{Email: "test@example.com"}, idem, 24*time.Hour, testLogger())
 
 	link := "http://localhost:8090/reset?token=xyz"
 	key := "email:reset:xyz"
@@ -190,7 +190,7 @@ func TestService_PasswordReset_SendSuccess_ThenMarkSuccess(t *testing.T) {
 
 	sender := &fakeSender{}
 	idem := newFakeIdem()
-	svc := NewService(sender, idem, 30*time.Minute, testLogger())
+	svc := NewService(sender, &FakeUserResolver{Email: "test@example.com"}, idem, 30*time.Minute, testLogger())
 
 	link := "http://localhost:8090/reset?token=xyz"
 	key := "email:reset:xyz"
@@ -221,7 +221,7 @@ func TestService_PasswordReset_SendFails_NoMark(t *testing.T) {
 	sender := &fakeSender{}
 	sender.SetResetErr(TemporaryError{msg: "temp"})
 	idem := newFakeIdem()
-	svc := NewService(sender, idem, 24*time.Hour, testLogger())
+	svc := NewService(sender, &FakeUserResolver{Email: "test@example.com"}, idem, 24*time.Hour, testLogger())
 
 	link := "http://localhost:8090/reset?token=xyz"
 	err := svc.PasswordReset(ctx, "u1", "a@b.com", link)
@@ -243,7 +243,7 @@ func TestService_PasswordReset_SendSuccess_MarkFails_ReturnsNil(t *testing.T) {
 	idem := newFakeIdem()
 	idem.SetMarkErr(errBoom)
 
-	svc := NewService(sender, idem, 24*time.Hour, testLogger())
+	svc := NewService(sender, &FakeUserResolver{Email: "test@example.com"}, idem, 24*time.Hour, testLogger())
 
 	link := "http://localhost:8090/reset?token=xyz"
 	err := svc.PasswordReset(ctx, "u1", "a@b.com", link)

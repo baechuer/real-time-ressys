@@ -46,6 +46,13 @@ func (s *fakeSender) SendPasswordReset(ctx context.Context, toEmail, url string)
 	return s.resetErr
 }
 
+func (s *fakeSender) SendEventCanceled(ctx context.Context, toEmail, eventID, reason string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Just track basic call count/args if needed, or no-op
+	return nil
+}
+
 func (s *fakeSender) VerifyCalls() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()

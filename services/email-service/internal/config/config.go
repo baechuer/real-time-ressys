@@ -35,6 +35,7 @@ type Config struct {
 	EmailWebAddr       string
 	EmailPublicBaseURL string
 	AuthBaseURL        string
+	AuthInternalSecret string
 
 	// Redis
 	RedisEnabled  bool
@@ -66,7 +67,7 @@ func Load() (*Config, error) {
 
 	cfg.Exchange = getEnv("RABBIT_EXCHANGE", "city.events")
 	cfg.Queue = getEnv("RABBIT_QUEUE", "email-service.q")
-	cfg.BindKeysCSV = getEnv("RABBIT_BIND_KEYS", "auth.email.#,auth.password.#")
+	cfg.BindKeysCSV = getEnv("RABBIT_BIND_KEYS", "auth.email.#,auth.password.#,email.#")
 
 	cfg.Prefetch = getInt("RABBIT_PREFETCH", 10)
 	cfg.ConsumeTag = getEnv("RABBIT_CONSUMER_TAG", "email-service")
@@ -91,6 +92,7 @@ func Load() (*Config, error) {
 	cfg.EmailWebAddr = getEnv("EMAIL_WEB_ADDR", ":8090")
 	cfg.EmailPublicBaseURL = strings.TrimRight(getEnv("EMAIL_PUBLIC_BASE_URL", "http://localhost:8090"), "/")
 	cfg.AuthBaseURL = strings.TrimRight(getEnv("AUTH_BASE_URL", "http://localhost:8080"), "/")
+	cfg.AuthInternalSecret = getEnv("INTERNAL_SECRET_KEY", "dev-secret-key")
 
 	// Redis
 	cfg.RedisEnabled = getBool("REDIS_ENABLED", false)

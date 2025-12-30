@@ -12,8 +12,9 @@ import (
 )
 
 type fakeHandler struct {
-	verifyCalled int
-	resetCalled  int
+	verifyCalled       int
+	resetCalled        int
+	eventCanceledCalls int // Added for testing
 
 	verifyErr error
 	resetErr  error
@@ -41,6 +42,13 @@ func (h *fakeHandler) PasswordReset(ctx context.Context, userID, email, url stri
 	h.resetCalled++
 	h.lastReset.userID, h.lastReset.email, h.lastReset.url = userID, email, url
 	return h.resetErr
+}
+
+func (h *fakeHandler) EventCanceled(ctx context.Context, eventID, userID, reason, prevStatus string) error {
+	_ = ctx
+	h.eventCanceledCalls++
+	// track if needed, or no-op
+	return nil
 }
 
 type fakePublisher struct {
@@ -137,27 +145,64 @@ func TestHandleDelivery_VerifyEmail_RewritesLinkTo8090(t *testing.T) {
 	c := newTestConsumer(h, p)
 	c.publicBase = "http://localhost:8090"
 
-	evt := VerifyEmailEvent{
-		UserID: "u1",
-		Email:  "a@b.com",
-		URL:    "http://localhost:8080/auth/v1/verify-email/confirm?token=XYZ",
-	}
+	t.Run("VerifyEmail_RewritesLinkTo8090", func(t *testing.T) {
+		evt := VerifyEmailEvent{
+			UserID: "u1",
+			Email:  "a@b.com",
+			URL:    "http://localhost:8080/auth/v1/verify-email/confirm?token=XYZ",
+		}
 
-	d := amqp.Delivery{
-		RoutingKey:  "auth.email.verify.requested",
-		ContentType: "application/json",
-		Body:        mustJSON(t, evt),
-	}
+		d := amqp.Delivery{
+			RoutingKey:  "auth.email.verify.requested",
+			ContentType: "application/json",
+			Body:        mustJSON(t, evt),
+		}
 
-	if err := c.handleDelivery(context.Background(), d); err != nil {
-		t.Fatalf("expected nil err, got %v", err)
-	}
-	if h.verifyCalled != 1 {
-		t.Fatalf("expected verify called once, got %d", h.verifyCalled)
-	}
-	if h.lastVerify.url != "http://localhost:8090/verify?token=XYZ" {
-		t.Fatalf("expected rewritten url, got %q", h.lastVerify.url)
-	}
+		if err := c.handleDelivery(context.Background(), d); err != nil {
+			t.Fatalf("expected nil err, got %v", err)
+		}
+		if h.verifyCalled != 1 {
+			t.Fatalf("expected verify called once, got %d", h.verifyCalled)
+		}
+		if h.lastVerify.url != "http://localhost:8090/verify?token=XYZ" {
+			t.Fatalf("expected rewritten url, got %q", h.lastVerify.url)
+		}
+	})
+
+	t.Run("EventCanceled", func(t *testing.T) {
+		payload := `{"event_id": "e1", "user_id": "u1", "reason": "r", "prev_status": "p"}`
+		d := amqp.Delivery{
+			RoutingKey: "email.event_canceled",
+			Body:       []byte(payload),
+		}
+
+		if err := c.handleDelivery(context.Background(), d); err != nil {
+			t.Errorf("expected nil error, got %v", err)
+		}
+
+		if h.eventCanceledCalls != 1 {
+			t.Errorf("expected 1 call, got %d", h.eventCanceledCalls)
+		}
+	})
+
+	t.Run("UnknownKey_Dropped", func(t *testing.T) {
+		// New hardening test: ensure unknown key returns nil (ack/drop) and doesn't error
+		d := amqp.Delivery{
+			RoutingKey: "email.unknown.event",
+			Body:       []byte(`{"some": "data"}`),
+		}
+
+		if err := c.handleDelivery(context.Background(), d); err != nil {
+			t.Errorf("expected nil error (drop), got %v", err)
+		}
+		// Confirm no handler calls
+		if h.verifyCalled != 1 { // from previous test
+			t.Errorf("calls should not increase for verify, got %d", h.verifyCalled)
+		}
+		if h.eventCanceledCalls != 1 { // from previous test
+			t.Errorf("calls should not increase for eventCanceled, got %d", h.eventCanceledCalls)
+		}
+	})
 }
 
 func TestHandleDelivery_BadJSON_GoesFinalDLQ(t *testing.T) {

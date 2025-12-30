@@ -56,9 +56,10 @@ func withEnv(t *testing.T, kv map[string]string) func() {
 // DB / Redis / RabbitMQ will be overridden per test case.
 func baseEnv(env string) map[string]string {
 	return map[string]string{
-		"ENV":        env,
-		"HTTP_ADDR":  ":0",
-		"JWT_SECRET": "test-secret",
+		"ENV":                 env,
+		"HTTP_ADDR":           ":0",
+		"JWT_SECRET":          "test-secret",
+		"INTERNAL_SECRET_KEY": "test-secret-key",
 
 		"ACCESS_TOKEN_TTL":         "15m",
 		"REFRESH_TOKEN_TTL":        "24h",
