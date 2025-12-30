@@ -11,7 +11,7 @@ import (
 	"github.com/baechuer/real-time-ressys/services/event-service/internal/config"
 	"github.com/baechuer/real-time-ressys/services/event-service/internal/domain"
 	"github.com/baechuer/real-time-ressys/services/event-service/internal/transport/http/handlers"
-	authmw "github.com/baechuer/real-time-ressys/services/event-service/internal/transport/http/middleware"
+	"github.com/baechuer/real-time-ressys/services/event-service/internal/transport/http/middleware"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -55,7 +55,7 @@ func (s *stubTxRepo) Update(ctx context.Context, e *domain.Event) error         
 func (s *stubTxRepo) InsertOutbox(ctx context.Context, msg event.OutboxMessage) error { return nil }
 
 func TestRouter_Routing(t *testing.T) {
-	auth := authmw.NewAuth("secret", "issuer")
+	authMw := middleware.NewAuth("secret", "issuer", nil)
 	clock := stubClock{}
 
 	// FIX: Corrected event.New signature:
@@ -70,7 +70,7 @@ func TestRouter_Routing(t *testing.T) {
 	}
 
 	// New(h, auth, z, rdb, cfg)
-	r := New(h, auth, z, nil, cfg)
+	r := New(h, authMw, z, nil, cfg)
 
 	t.Run("public_route_returns_200", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/event/v1/events", nil)

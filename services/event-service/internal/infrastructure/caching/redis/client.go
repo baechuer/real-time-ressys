@@ -64,3 +64,13 @@ func (c *Client) Delete(ctx context.Context, keys ...string) error {
 	}
 	return c.rdb.Del(ctx, keys...).Err()
 }
+
+func (c *Client) GetTokenVersion(ctx context.Context, userID string) (int64, error) {
+	// auth-service key pattern: "tokenver:" + userID
+	key := "tokenver:" + userID
+	val, err := c.rdb.Get(ctx, key).Int64()
+	if err == redis.Nil {
+		return 0, nil // not found
+	}
+	return val, err
+}

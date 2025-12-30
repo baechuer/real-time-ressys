@@ -127,7 +127,7 @@ func NewApp(cfg *config.Config, db *sql.DB) *App {
 	svc := event.New(repo, sysClock{}, cache, cfg.CacheTTLDetails, cfg.CacheTTLList)
 
 	h := handlers.NewEventsHandler(svc, sysClock{})
-	auth := authmw.NewAuth(cfg.JWTSecret, cfg.JWTIssuer)
+	auth := authmw.NewAuth(cfg.JWTSecret, cfg.JWTIssuer, rc)
 	z := handlers.NewHealthHandler()
 
 	// router uses rawRedisInstance for middleware (if any)

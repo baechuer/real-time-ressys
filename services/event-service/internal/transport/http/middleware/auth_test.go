@@ -13,7 +13,7 @@ import (
 func TestAuthMiddleware_Require(t *testing.T) {
 	secret := "test-secret"
 	issuer := "test-issuer"
-	auth := NewAuth(secret, issuer)
+	auth := NewAuth("secret", "issuer", nil)
 
 	// Helper to generate a valid token
 	generateToken := func(uid, role string, iss string, secret string, expired bool) string {

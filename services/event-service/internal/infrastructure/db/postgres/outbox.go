@@ -3,6 +3,8 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"math"
+	"math/rand"
 	"time"
 
 	"github.com/baechuer/real-time-ressys/services/event-service/internal/application/event"
@@ -15,8 +17,8 @@ type txRepo struct {
 
 const insertOutboxSQL = `
 INSERT INTO event_outbox (
-  message_id, routing_key, body, created_at
-) VALUES ($1, $2, $3::jsonb, $4)
+  message_id, routing_key, body, created_at, status, next_retry_at
+) VALUES ($1, $2, $3::jsonb, $4, 'pending', $4)
 `
 
 const selectEventForUpdateSQL = `
@@ -55,6 +57,7 @@ func (r *txRepo) Update(ctx context.Context, e *domain.Event) error {
 
 func (r *txRepo) InsertOutbox(ctx context.Context, msg event.OutboxMessage) error {
 	// Store JSON as text cast to jsonb for lib/pq compatibility.
+	// We set next_retry_at = created_at so it is immediately eligible for polling.
 	_, err := r.tx.ExecContext(ctx, insertOutboxSQL,
 		msg.MessageID,
 		msg.RoutingKey,
@@ -71,37 +74,65 @@ type outboxRow struct {
 	MessageID  string
 	RoutingKey string
 	Body       []byte
+	Attempts   int
 }
 
-const selectOutboxBatchForUpdateSQL = `
-SELECT id, message_id, routing_key, body
+// Select pending messages that are due for retry.
+// We use SKIP LOCKED to allow multiple workers.
+const selectOutboxClaimsSQL = `
+SELECT id, message_id, routing_key, body, attempts
 FROM event_outbox
-WHERE sent_at IS NULL
-ORDER BY id ASC
+WHERE status = 'pending'
+  AND (next_retry_at IS NULL OR next_retry_at <= NOW())
+ORDER BY next_retry_at ASC, created_at ASC
 LIMIT $1
 FOR UPDATE SKIP LOCKED
 `
 
+const updateOutboxClaimSQL = `
+UPDATE event_outbox
+SET next_retry_at = $2,
+    status = 'processing'
+WHERE id = $1
+`
+
 const markOutboxSentSQL = `
 UPDATE event_outbox
-SET sent_at = $2,
-    attempts = attempts + 1,
+SET status = 'sent',
+    sent_at = $2,
     last_error = NULL
 WHERE id = $1
 `
 
 const markOutboxFailedSQL = `
 UPDATE event_outbox
-SET attempts = attempts + 1,
+SET status = 'pending', -- retryable
+    attempts = attempts + 1,
+    next_retry_at = $2,
+    last_error = $3
+WHERE id = $1
+`
+
+const markOutboxDeadSQL = `
+UPDATE event_outbox
+SET status = 'dead',
+    attempts = attempts + 1,
     last_error = $2
 WHERE id = $1
 `
 
+const maxAttempts = 10
+
 // StartOutboxWorker starts a polling worker that publishes pending outbox rows to RabbitMQ.
-// This is intentionally simple (polling + SKIP LOCKED) and safe under concurrency.
+// Refactored to use Claim Check pattern:
+// 1. Claim rows in DB TX (short)
+// 2. Publish (Network, potentially slow)
+// 3. Update status (DB TX, short)
 func (r *Repo) StartOutboxWorker(ctx context.Context, pub event.EventPublisher) {
 	go func() {
-		ticker := time.NewTicker(1 * time.Second)
+		// Jitter ticker to prevent thundering herd if multiple instances start together
+		time.Sleep(time.Duration(rand.Intn(1000)) * time.Millisecond)
+		ticker := time.NewTicker(500 * time.Millisecond)
 		defer ticker.Stop()
 
 		for {
@@ -109,59 +140,102 @@ func (r *Repo) StartOutboxWorker(ctx context.Context, pub event.EventPublisher) 
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				r.processOutboxBatch(ctx, pub, 50)
+				if err := r.processOutboxBatch(ctx, pub, 20); err != nil {
+					// log error? using fmt for now as no logger injected
+					// fmt.Printf("outbox error: %v\n", err)
+				}
 			}
 		}
 	}()
 }
 
-func (r *Repo) processOutboxBatch(ctx context.Context, pub event.EventPublisher, limit int) {
+func (r *Repo) processOutboxBatch(ctx context.Context, pub event.EventPublisher, limit int) error {
 	if limit <= 0 {
 		limit = 50
 	}
 
-	// Short operation window to avoid pile-ups.
-	opCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	// 1. Claim Phase
+	// Use a short timeout for the claim transaction
+	claimCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	tx, err := r.db.BeginTx(opCtx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	tx, err := r.db.BeginTx(claimCtx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
-		return
+		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	rows, err := tx.QueryContext(opCtx, selectOutboxBatchForUpdateSQL, limit)
+	rows, err := tx.QueryContext(claimCtx, selectOutboxClaimsSQL, limit)
 	if err != nil {
-		return
+		return err
 	}
 	defer rows.Close()
 
 	var batch []outboxRow
 	for rows.Next() {
-		var r outboxRow
-		if err := rows.Scan(&r.ID, &r.MessageID, &r.RoutingKey, &r.Body); err != nil {
-			return
+		var item outboxRow
+		if err := rows.Scan(&item.ID, &item.MessageID, &item.RoutingKey, &item.Body, &item.Attempts); err != nil {
+			return err
 		}
-		batch = append(batch, r)
+		batch = append(batch, item)
 	}
 	if err := rows.Err(); err != nil {
-		return
+		return err
 	}
+
 	if len(batch) == 0 {
-		_ = tx.Commit()
+		return tx.Commit() // nothing to do
+	}
+
+	// Mark as 'processing' and push retry into future (reservation) to prevent others from picking it up
+	// if this worker crashes before reducing the timeout.
+	reservation := time.Now().UTC().Add(30 * time.Second)
+	for _, item := range batch {
+		if _, err := tx.ExecContext(claimCtx, updateOutboxClaimSQL, item.ID, reservation); err != nil {
+			return err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	// 2. Process Phase (No DB Lock)
+	// We iterate through the batch. For each, we try to publish, then immediately mark result.
+	// We can do this casually without holding a big lock.
+	for _, item := range batch {
+		r.processSingleItem(ctx, pub, item)
+	}
+
+	return nil
+}
+
+func (r *Repo) processSingleItem(ctx context.Context, pub event.EventPublisher, item outboxRow) {
+	// Pub timeout
+	pubCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	err := pub.PublishEvent(pubCtx, item.RoutingKey, item.MessageID, item.Body)
+
+	// Result update timeout
+	resCtx, cancelRes := context.WithTimeout(ctx, 3*time.Second)
+	defer cancelRes()
+
+	if err != nil {
+		errMsg := err.Error()
+		if item.Attempts >= maxAttempts {
+			_, _ = r.db.ExecContext(resCtx, markOutboxDeadSQL, item.ID, errMsg)
+		} else {
+			// Exponential backoff
+			backoff := time.Duration(math.Pow(2, float64(item.Attempts))) * time.Second
+			// Add jitter
+			backoff += time.Duration(rand.Intn(1000)) * time.Millisecond
+			nextRetry := time.Now().UTC().Add(backoff)
+			_, _ = r.db.ExecContext(resCtx, markOutboxFailedSQL, item.ID, nextRetry, errMsg)
+		}
 		return
 	}
 
-	now := time.Now().UTC()
-
-	for _, m := range batch {
-		// publish each message and mark state inside the same tx holding the lock.
-		if err := pub.PublishEvent(opCtx, m.RoutingKey, m.MessageID, m.Body); err != nil {
-			_, _ = tx.ExecContext(opCtx, markOutboxFailedSQL, m.ID, err.Error())
-			continue
-		}
-		_, _ = tx.ExecContext(opCtx, markOutboxSentSQL, m.ID, now)
-	}
-
-	_ = tx.Commit()
+	// Success
+	_, _ = r.db.ExecContext(resCtx, markOutboxSentSQL, item.ID, time.Now().UTC())
 }

@@ -27,13 +27,22 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
-type AuthMiddleware struct {
-	secret []byte
-	issuer string
+type TokenVersionChecker interface {
+	GetTokenVersion(ctx context.Context, userID string) (int64, error)
 }
 
-func NewAuth(secret, issuer string) *AuthMiddleware {
-	return &AuthMiddleware{secret: []byte(secret), issuer: issuer}
+type AuthMiddleware struct {
+	secret       []byte
+	issuer       string
+	versionCheck TokenVersionChecker
+}
+
+func NewAuth(secret, issuer string, versionCheck TokenVersionChecker) *AuthMiddleware {
+	return &AuthMiddleware{
+		secret:       []byte(secret),
+		issuer:       issuer,
+		versionCheck: versionCheck,
+	}
 }
 
 func (a *AuthMiddleware) Require(next http.Handler) http.Handler {
@@ -50,6 +59,25 @@ func (a *AuthMiddleware) Require(next http.Handler) http.Handler {
 				response.RequestIDFromRequest(r),
 			)
 			return
+		}
+
+		// Check revocation via version
+		if a.versionCheck != nil {
+			currentVer, err := a.versionCheck.GetTokenVersion(r.Context(), uid)
+			if err == nil && currentVer > ver {
+				response.Fail(
+					w,
+					http.StatusUnauthorized,
+					"token_revoked",
+					"token version obsolete",
+					nil,
+					response.RequestIDFromRequest(r),
+				)
+				return
+			}
+			// if err != nil (Redis down) or currentVer == 0 (not in cache), we allow (fail open)
+			// to avoid complete service outage if redis blips.
+			// "Secure by default" would fail here, but availability usually wins in this project scope.
 		}
 
 		ctx := context.WithValue(r.Context(), ctxUserID, uid)
