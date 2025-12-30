@@ -21,8 +21,9 @@ type Env struct {
 	JWTSecret string
 	JWTIssuer string
 
-	UserToken  string
-	AdminToken string
+	UserToken      string
+	OrganizerToken string
+	AdminToken     string
 }
 
 func mustEnv(t *testing.T, k string) string {
@@ -79,6 +80,10 @@ func setup(t *testing.T) Env {
 	e.UserToken, err = infra.MakeToken(e.JWTSecret, e.JWTIssuer, "11111111-1111-1111-1111-111111111111", "user", 0, 15*time.Minute)
 	if err != nil {
 		t.Fatalf("make user token: %v", err)
+	}
+	e.OrganizerToken, err = infra.MakeToken(e.JWTSecret, e.JWTIssuer, "22222222-2222-2222-2222-222222222222", "organizer", 0, 15*time.Minute)
+	if err != nil {
+		t.Fatalf("make organizer token: %v", err)
 	}
 	e.AdminToken, err = infra.MakeToken(e.JWTSecret, e.JWTIssuer, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "admin", 0, 15*time.Minute)
 	if err != nil {
@@ -145,9 +150,10 @@ func createAndPublish(t *testing.T, e Env, title, desc string) string {
 		"capacity":    100,
 	}
 
-	code, env := doJSON(t, "POST", e.BaseURL+"/event/v1/events", e.UserToken, body)
+	// Use OrganizerToken to create
+	code, env := doJSON(t, "POST", e.BaseURL+"/event/v1/events", e.OrganizerToken, body)
 	if code != 201 {
-		t.Fatalf("create failed: %d", code)
+		t.Fatalf("create failed: %d err=%v", code, env.Error)
 	}
 
 	var created struct {
@@ -157,7 +163,8 @@ func createAndPublish(t *testing.T, e Env, title, desc string) string {
 		t.Fatalf("unmarshal created id failed: %v", err)
 	}
 
-	code, _ = doJSON(t, "POST", e.BaseURL+"/event/v1/events/"+created.ID+"/publish", e.UserToken, nil)
+	// Use OrganizerToken to publish
+	code, _ = doJSON(t, "POST", e.BaseURL+"/event/v1/events/"+created.ID+"/publish", e.OrganizerToken, nil)
 	if code != 200 {
 		t.Fatalf("publish failed: %d", code)
 	}

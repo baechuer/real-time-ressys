@@ -27,7 +27,7 @@ func TestEventsCRUD_PublishCancel(t *testing.T) {
 		"capacity":    0,
 	}
 
-	code, env := doJSON(t, "POST", e.BaseURL+"/event/v1/events", e.UserToken, createBody)
+	code, env := doJSON(t, "POST", e.BaseURL+"/event/v1/events", e.OrganizerToken, createBody)
 	if code != 201 {
 		t.Fatalf("create want 201 got %d err=%v", code, env.Error)
 	}
@@ -40,7 +40,7 @@ func TestEventsCRUD_PublishCancel(t *testing.T) {
 		t.Fatalf("want draft got %s", created.Status)
 	}
 
-	code, env = doJSON(t, "POST", e.BaseURL+"/event/v1/events/"+created.ID+"/publish", e.UserToken, nil)
+	code, env = doJSON(t, "POST", e.BaseURL+"/event/v1/events/"+created.ID+"/publish", e.OrganizerToken, nil)
 	if code != 200 {
 		t.Fatalf("publish want 200 got %d err=%v", code, env.Error)
 	}
@@ -50,7 +50,7 @@ func TestEventsCRUD_PublishCancel(t *testing.T) {
 		t.Fatalf("want published got %s", published.Status)
 	}
 
-	code, env = doJSON(t, "POST", e.BaseURL+"/event/v1/events/"+created.ID+"/cancel", e.UserToken, nil)
+	code, env = doJSON(t, "POST", e.BaseURL+"/event/v1/events/"+created.ID+"/cancel", e.OrganizerToken, nil)
 	if code != 200 {
 		t.Fatalf("cancel want 200 got %d err=%v", code, env.Error)
 	}
@@ -60,7 +60,7 @@ func TestEventsCRUD_PublishCancel(t *testing.T) {
 		t.Fatalf("want canceled got %s", canceled.Status)
 	}
 
-	code, env = doJSON(t, "POST", e.BaseURL+"/event/v1/events/"+created.ID+"/cancel", e.UserToken, nil)
+	code, env = doJSON(t, "POST", e.BaseURL+"/event/v1/events/"+created.ID+"/cancel", e.OrganizerToken, nil)
 	if code != 409 {
 		t.Fatalf("cancel twice want 409 got %d err=%v", code, env.Error)
 	}

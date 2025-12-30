@@ -14,7 +14,7 @@ import (
 func TestOrganizerACL_OwnerOtherAdmin(t *testing.T) {
 	e := setup(t)
 
-	otherToken, err := infra.MakeToken(e.JWTSecret, e.JWTIssuer, "22222222-2222-2222-2222-222222222222", "user", 0, 15*time.Minute)
+	otherToken, err := infra.MakeToken(e.JWTSecret, e.JWTIssuer, "33333333-3333-3333-3333-333333333333", "user", 0, 15*time.Minute)
 	if err != nil {
 		t.Fatalf("make other token: %v", err)
 	}
@@ -29,7 +29,7 @@ func TestOrganizerACL_OwnerOtherAdmin(t *testing.T) {
 		"capacity":    0,
 	}
 
-	code, env := doJSON(t, "POST", e.BaseURL+"/event/v1/events", e.UserToken, createBody)
+	code, env := doJSON(t, "POST", e.BaseURL+"/event/v1/events", e.OrganizerToken, createBody)
 	if code != 201 {
 		t.Fatalf("create want 201 got %d err=%v", code, env.Error)
 	}
