@@ -68,7 +68,20 @@ func baseEnv(env string) map[string]string {
 
 		"VERIFY_EMAIL_BASE_URL":   "http://example.com/verify?token=",
 		"PASSWORD_RESET_BASE_URL": "http://example.com/reset?token=",
+
+		// Default infra (CI can override these later via withEnv if needed,
+		// but since withEnv REPLACES env, we need a way to say "keep existing if set")
+		// Actually, let's change withEnv usage in tests to respect existing if we want.
+		// BETTER: The individual tests below are forcefully setting DB_ADDR.
+		// We should change them to use os.Getenv("IT_PG_DSN") if present, else fallback.
 	}
+}
+
+func getInfraEnv(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
 }
 
 // --------------------------
@@ -98,9 +111,9 @@ func TestNewServer_ConfigLoadFails(t *testing.T) {
 func TestNewServer_DBConnectFails(t *testing.T) {
 	restore := withEnv(t, func() map[string]string {
 		env := baseEnv("dev")
-		env["DB_ADDR"] = "postgres://invalid:5432/db"
-		env["REDIS_ADDR"] = "localhost:6379"
-		env["RABBIT_URL"] = "amqp://guest:guest@localhost:5672/"
+		env["DB_ADDR"] = "postgres://invalid:5432/db" // Explicitly invalid
+		env["REDIS_ADDR"] = getInfraEnv("IT_REDIS_ADDR", "localhost:6379")
+		env["RABBIT_URL"] = getInfraEnv("IT_RABBIT_URL", "amqp://guest:guest@localhost:5672/")
 		return env
 	}())
 	defer restore()
@@ -122,9 +135,10 @@ func TestNewServer_DBConnectFails(t *testing.T) {
 func TestNewServer_RedisUnavailable_FallbackMemory(t *testing.T) {
 	restore := withEnv(t, func() map[string]string {
 		env := baseEnv("dev")
-		env["DB_ADDR"] = "postgres://user:pass@localhost:5432/postgres?sslmode=disable"
-		env["REDIS_ADDR"] = "localhost:1" // invalid port
-		env["RABBIT_URL"] = "amqp://guest:guest@localhost:5672/"
+		// Use real DB from CI
+		env["DB_ADDR"] = getInfraEnv("IT_PG_DSN", "postgres://user:pass@localhost:5432/postgres?sslmode=disable")
+		env["REDIS_ADDR"] = "localhost:1" // Explicitly invalid for this test
+		env["RABBIT_URL"] = getInfraEnv("IT_RABBIT_URL", "amqp://guest:guest@localhost:5672/")
 		return env
 	}())
 	defer restore()
@@ -149,9 +163,9 @@ func TestNewServer_RedisUnavailable_FallbackMemory(t *testing.T) {
 func TestNewServer_RabbitUnavailable_Dev_Allows(t *testing.T) {
 	restore := withEnv(t, func() map[string]string {
 		env := baseEnv("dev")
-		env["DB_ADDR"] = "postgres://user:pass@localhost:5432/postgres?sslmode=disable"
-		env["REDIS_ADDR"] = "localhost:6379"
-		env["RABBIT_URL"] = "amqp://invalid"
+		env["DB_ADDR"] = getInfraEnv("IT_PG_DSN", "postgres://user:pass@localhost:5432/postgres?sslmode=disable")
+		env["REDIS_ADDR"] = getInfraEnv("IT_REDIS_ADDR", "localhost:6379")
+		env["RABBIT_URL"] = "amqp://invalid" // Explicitly invalid
 		return env
 	}())
 	defer restore()
@@ -170,9 +184,9 @@ func TestNewServer_RabbitUnavailable_Dev_Allows(t *testing.T) {
 func TestNewServer_RabbitUnavailable_Prod_Fails(t *testing.T) {
 	restore := withEnv(t, func() map[string]string {
 		env := baseEnv("prod")
-		env["DB_ADDR"] = "postgres://user:pass@localhost:5432/postgres?sslmode=disable"
-		env["REDIS_ADDR"] = "localhost:6379"
-		env["RABBIT_URL"] = "amqp://invalid"
+		env["DB_ADDR"] = getInfraEnv("IT_PG_DSN", "postgres://user:pass@localhost:5432/postgres?sslmode=disable")
+		env["REDIS_ADDR"] = getInfraEnv("IT_REDIS_ADDR", "localhost:6379")
+		env["RABBIT_URL"] = "amqp://invalid" // Explicitly invalid
 		return env
 	}())
 	defer restore()
@@ -193,9 +207,9 @@ func TestNewServer_RabbitUnavailable_Prod_Fails(t *testing.T) {
 func TestNewServer_Cleanup_Idempotent(t *testing.T) {
 	restore := withEnv(t, func() map[string]string {
 		env := baseEnv("dev")
-		env["DB_ADDR"] = "postgres://user:pass@localhost:5432/postgres?sslmode=disable"
-		env["REDIS_ADDR"] = "localhost:6379"
-		env["RABBIT_URL"] = "amqp://guest:guest@localhost:5672/"
+		env["DB_ADDR"] = getInfraEnv("IT_PG_DSN", "postgres://user:pass@localhost:5432/postgres?sslmode=disable")
+		env["REDIS_ADDR"] = getInfraEnv("IT_REDIS_ADDR", "localhost:6379")
+		env["RABBIT_URL"] = getInfraEnv("IT_RABBIT_URL", "amqp://guest:guest@localhost:5672/")
 		return env
 	}())
 	defer restore()

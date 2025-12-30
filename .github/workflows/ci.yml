@@ -70,6 +70,33 @@ jobs:
             redis_addr: "localhost:6381"
             rabbit_url: "amqp://guest:guest@localhost:5674/"
 
+    env:
+      # Common / Matrix
+      IT_PG_DSN: ${{ matrix.pg_dsn }}
+      IT_REDIS_ADDR: ${{ matrix.redis_addr }}
+      IT_RABBIT_URL: ${{ matrix.rabbit_url }}
+
+      # Secrets
+      JWT_SECRET: "test-secret"
+      JWT_ISSUER: "self-project"
+      INTERNAL_SECRET_KEY: "test-secret-key"
+
+      # Mappings for various services
+      # Join
+      TEST_DB_DSN: ${{ matrix.pg_dsn }}
+      TEST_REDIS_ADDR: ${{ matrix.redis_addr }}
+      TEST_RABBIT_URL: ${{ matrix.rabbit_url }}
+
+      # Event & Auth
+      DB_ADDR: ${{ matrix.pg_dsn }}
+      DATABASE_URL: ${{ matrix.pg_dsn }}
+      REDIS_ADDR: ${{ matrix.redis_addr }}
+      RABBIT_URL: ${{ matrix.rabbit_url }}
+      
+      # Event Service specific
+      EVENT_BASE_URL: "http://localhost:8080"
+      HTTP_ADDR: ":8080"
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -86,37 +113,27 @@ jobs:
           set -euo pipefail
           docker compose -f ${{ matrix.compose_file }} up -d --wait
 
-      - name: Integration tests
-        working-directory: services/${{ matrix.svc }}
-        env:
-          # Common / Default mapping
-          IT_PG_DSN: ${{ matrix.pg_dsn }}
-          IT_REDIS_ADDR: ${{ matrix.redis_addr }}
-          IT_RABBIT_URL: ${{ matrix.rabbit_url }}
-
-          # Service-specific overrides (so we don't have to change Go code)
-          # Join Service
-          TEST_DB_DSN: ${{ matrix.pg_dsn }}
-          TEST_REDIS_ADDR: ${{ matrix.redis_addr }}
-          TEST_RABBIT_URL: ${{ matrix.rabbit_url }}
-
-          # Event Service
-          EVENT_BASE_URL: "http://localhost:8080" # Dummy URL if tests need it, or we might need to spin up the app?
-          # Actually event-service integration tests seem to need DB/Redis/Rabbit envs too, let's see what they are named.
-          DATABASE_URL: ${{ matrix.pg_dsn }}
-          REDIS_ADDR: ${{ matrix.redis_addr }}
-          RABBIT_URL: ${{ matrix.rabbit_url }}
-          
-          # Auth Service
-          # Checks 'config.Load' which uses standard envs + prefixes?
-          # The tests likely use loaded config or specific env vars.
-          # From logs: "failed to connect to `user=user database=postgres`: 127.0.0.1:5432... connection refused"
-          # This implies it's trying to connect to localhost:5432 (default) instead of the port forwarded one (54321).
-          # We need to ensure the app config picks up the matrix ports.
-          PORT: 8081 # avoid conflict?
-          
+      - name: Start Application (Event Service Only)
+        if: matrix.svc == 'event-service'
+        working-directory: services/event-service
         run: |
           set -euo pipefail
+          echo "Building event-service..."
+          go build -o app api/cmd/main.go
+          echo "Starting event-service..."
+          ./app &
+          
+          echo "Waiting for healthz..."
+          timeout 30 sh -c 'until curl -s http://localhost:8080/healthz; do sleep 1; done'
+          echo "Event Service valid and running!"
+
+      - name: Integration tests
+        working-directory: services/${{ matrix.svc }}
+        run: |
+          set -euo pipefail
+          echo "Debug: IT_PG_DSN=${IT_PG_DSN}"
+          echo "Debug: DB_ADDR=${DB_ADDR}"
+          
           # Only run integration tests if the directory exists (sanity check)
           if [ -d "test/integration" ] || [ -d "internal" ]; then
              go test -tags=integration ./... -count=1 -p=1 -v -timeout 5m
