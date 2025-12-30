@@ -41,9 +41,34 @@ jobs:
           go test ./... -race
 
 
-  integration-auth:
+  integration-tests:
     runs-on: ubuntu-latest
     needs: [unit-tests]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - svc: auth-service
+            compose_file: test/integration/infra/compose.yaml
+            pg_dsn: "postgres://user:pass@localhost:54321/app"
+            redis_addr: "localhost:63791"
+            rabbit_url: "amqp://it:it@localhost:56731/"
+          - svc: event-service
+            compose_file: test/integration/infra/compose.yaml
+            pg_dsn: "postgres://user:pass@localhost:5432/app?sslmode=disable"
+            redis_addr: "localhost:6379"
+            rabbit_url: "amqp://guest:guest@localhost:5672/"
+          - svc: join-service
+            compose_file: docker-compose.test.yml
+            pg_dsn: "postgres://test_user:test_password@localhost:5433/join_service_test?sslmode=disable"
+            redis_addr: "localhost:6380"
+            rabbit_url: "amqp://test_user:test_password@localhost:5673/"
+          - svc: email-service
+            compose_file: test/integration/infra/compose.yaml
+            # Email service doesn't use Postgres in integration test, but we can leave placeholder or empty
+            pg_dsn: "" 
+            redis_addr: "localhost:6381"
+            rabbit_url: "amqp://guest:guest@localhost:5674/"
 
     steps:
       - name: Checkout
@@ -55,31 +80,35 @@ jobs:
           go-version: "1.22.x"
           cache: false
 
-      - name: Start integration infra (auth-service)
-        working-directory: services/auth-service
+      - name: Start integration infra
+        working-directory: services/${{ matrix.svc }}
         run: |
           set -euo pipefail
-          docker compose -f test/integration/infra/compose.yaml up -d
+          docker compose -f ${{ matrix.compose_file }} up -d --wait
 
-      - name: Integration tests (auth-service)
-        working-directory: services/auth-service
+      - name: Integration tests
+        working-directory: services/${{ matrix.svc }}
         env:
-          IT_PG_DSN: postgres://user:pass@localhost:54321/app?sslmode=disable
-          IT_REDIS_ADDR: localhost:63791
-          IT_RABBIT_URL: amqp://it:it@localhost:56731/
+          IT_PG_DSN: ${{ matrix.pg_dsn }}
+          IT_REDIS_ADDR: ${{ matrix.redis_addr }}
+          IT_RABBIT_URL: ${{ matrix.rabbit_url }}
         run: |
           set -euo pipefail
-          go test -tags=integration ./test/integration/... \
-            -count=1 -p=1 -v -timeout 5m
+          # Only run integration tests if the directory exists (sanity check)
+          if [ -d "test/integration" ] || [ -d "internal" ]; then
+             go test -tags=integration ./... -count=1 -p=1 -v -timeout 5m
+          else
+             echo "No integration tests found"
+          fi
 
       - name: Logs on failure
         if: failure()
-        working-directory: services/auth-service
+        working-directory: services/${{ matrix.svc }}
         run: |
-          docker compose -f test/integration/infra/compose.yaml logs --no-color
+          docker compose -f ${{ matrix.compose_file }} logs --no-color
 
       - name: Down
         if: always()
-        working-directory: services/auth-service
+        working-directory: services/${{ matrix.svc }}
         run: |
-          docker compose -f test/integration/infra/compose.yaml down -v
+          docker compose -f ${{ matrix.compose_file }} down -v

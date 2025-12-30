@@ -14,11 +14,12 @@ import (
 type SMTPSender struct {
 	lg zerolog.Logger
 
-	host string
-	port int
-	user string
-	pass string
-	from string
+	host     string
+	port     int
+	user     string
+	pass     string
+	from     string
+	insecure bool
 
 	timeout time.Duration
 }
@@ -30,17 +31,19 @@ type SMTPConfig struct {
 	Password string
 	From     string
 	Timeout  time.Duration
+	Insecure bool
 }
 
 func NewSMTPSender(cfg SMTPConfig, lg zerolog.Logger) *SMTPSender {
 	return &SMTPSender{
-		lg:      lg.With().Str("component", "smtp_sender").Logger(),
-		host:    cfg.Host,
-		port:    cfg.Port,
-		user:    cfg.Username,
-		pass:    cfg.Password,
-		from:    cfg.From,
-		timeout: cfg.Timeout,
+		lg:       lg.With().Str("component", "smtp_sender").Logger(),
+		host:     cfg.Host,
+		port:     cfg.Port,
+		user:     cfg.Username,
+		pass:     cfg.Password,
+		from:     cfg.From,
+		insecure: cfg.Insecure,
+		timeout:  cfg.Timeout,
 	}
 }
 
@@ -94,13 +97,18 @@ func (s *SMTPSender) send(ctx context.Context, to, subject, textBody, htmlBody s
 	m.SetBodyString(mail.TypeTextPlain, textBody)
 	m.AddAlternativeString(mail.TypeTextHTML, htmlBody)
 
+	tlsPolicy := mail.TLSMandatory
+	if s.insecure {
+		tlsPolicy = mail.TLSOpportunistic
+	}
+
 	c, err := mail.NewClient(
 		s.host,
 		mail.WithPort(s.port),
 		mail.WithSMTPAuth(mail.SMTPAuthPlain),
 		mail.WithUsername(s.user),
 		mail.WithPassword(s.pass),
-		mail.WithTLSPolicy(mail.TLSMandatory),
+		mail.WithTLSPolicy(tlsPolicy),
 	)
 	if err != nil {
 		return PermanentError{msg: "smtp client init failed: " + err.Error()}

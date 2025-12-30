@@ -30,6 +30,7 @@ type Config struct {
 	SMTPPassword string
 	SMTPFrom     string
 	SMTPTimeout  time.Duration
+	SMTPInsecure bool // NEW for dev/it
 
 	// Email-service Web
 	EmailWebAddr       string
@@ -81,6 +82,7 @@ func Load() (*Config, error) {
 	cfg.SMTPPassword = getEnv("SMTP_PASSWORD", "")
 	cfg.SMTPFrom = getEnv("SMTP_FROM", cfg.SMTPUsername)
 	cfg.SMTPTimeout = getDuration("SMTP_TIMEOUT", 10*time.Second)
+	cfg.SMTPInsecure = getBool("SMTP_INSECURE", false)
 
 	if cfg.EmailSender == "smtp" {
 		if cfg.SMTPHost == "" || cfg.SMTPUsername == "" || cfg.SMTPPassword == "" {

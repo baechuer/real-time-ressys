@@ -40,6 +40,7 @@ func NewApp() (*App, func(), error) {
 			Username: cfg.SMTPUsername,
 			Password: cfg.SMTPPassword,
 			From:     cfg.SMTPFrom,
+			Insecure: cfg.SMTPInsecure,
 			Timeout:  cfg.SMTPTimeout,
 		}, log.Logger)
 	default:
