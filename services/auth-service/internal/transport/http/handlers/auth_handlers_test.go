@@ -357,8 +357,9 @@ func TestAuthHandler_Register_SetsRefreshCookie_AndReturns201(t *testing.T) {
 	if !ck.HttpOnly {
 		t.Fatalf("expected HttpOnly cookie")
 	}
-	if ck.Path != "/auth/v1" {
-		t.Fatalf("expected cookie Path=/auth/v1, got %q", ck.Path)
+	// Path should now be /
+	if ck.Path != "/" {
+		t.Fatalf("expected cookie Path=/, got %q", ck.Path)
 	}
 	if ck.MaxAge <= 0 {
 		t.Fatalf("expected MaxAge > 0, got %d", ck.MaxAge)
@@ -402,12 +403,16 @@ func TestAuthHandler_Login_OK_SetsCookie(t *testing.T) {
 		t.Fatalf("expected 200, got %d", res.StatusCode)
 	}
 
-	ck := readCookie(res, security.RefreshCookieName)
+	// secure=true -> expect __Host- prefix
+	ck := readCookie(res, "__Host-"+security.RefreshCookieName)
 	if ck == nil {
-		t.Fatalf("expected refresh cookie to be set")
+		t.Fatalf("expected refresh cookie (__Host-...) to be set")
 	}
 	if ck.Secure != true {
 		t.Fatalf("expected Secure cookie (secureCookies=true)")
+	}
+	if ck.Path != "/" {
+		t.Fatalf("expected Path=/, got %q", ck.Path)
 	}
 }
 
@@ -440,15 +445,16 @@ func TestAuthHandler_Logout_ClearsCookie_Returns204(t *testing.T) {
 		t.Fatalf("expected 204, got %d", res.StatusCode)
 	}
 
-	ck := readCookie(res, security.RefreshCookieName)
+	// secure=true -> expect __Host-
+	ck := readCookie(res, "__Host-"+security.RefreshCookieName)
 	if ck == nil {
 		t.Fatalf("expected refresh cookie to be cleared (Set-Cookie)")
 	}
 	if ck.MaxAge != -1 {
 		t.Fatalf("expected MaxAge=-1, got %d", ck.MaxAge)
 	}
-	if ck.Path != "/auth/v1" {
-		t.Fatalf("expected Path=/auth/v1, got %q", ck.Path)
+	if ck.Path != "/" {
+		t.Fatalf("expected Path=/, got %q", ck.Path)
 	}
 	if ck.Secure != true {
 		t.Fatalf("expected Secure cookie (secureCookies=true)")
@@ -770,12 +776,16 @@ func TestAuthHandler_PasswordChange_ClearsCookie(t *testing.T) {
 		t.Fatalf("expected 204, got %d; body=%s", res.StatusCode, rr.Body.String())
 	}
 
-	ck := readCookie(res, security.RefreshCookieName)
+	// secure=true -> __Host-
+	ck := readCookie(res, "__Host-"+security.RefreshCookieName)
 	if ck == nil {
 		t.Fatalf("expected refresh cookie to be set")
 	}
 	if ck.MaxAge != -1 {
 		t.Fatalf("expected refresh cookie cleared (MaxAge=-1), got %d", ck.MaxAge)
+	}
+	if ck.Path != "/" {
+		t.Fatalf("expected Path=/, got %q", ck.Path)
 	}
 }
 

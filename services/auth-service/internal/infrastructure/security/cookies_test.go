@@ -11,6 +11,7 @@ func TestSetRefreshToken_SetsCookieAttributes(t *testing.T) {
 	t.Parallel()
 
 	rr := httptest.NewRecorder()
+	// secure=true -> expect __Host-refresh_token
 	SetRefreshToken(rr, "tok123", 10*time.Minute, true)
 
 	res := rr.Result()
@@ -22,21 +23,22 @@ func TestSetRefreshToken_SetsCookieAttributes(t *testing.T) {
 	}
 
 	var c *http.Cookie
+	targetName := "__Host-" + RefreshCookieName
 	for _, ck := range cookies {
-		if ck.Name == RefreshCookieName {
+		if ck.Name == targetName {
 			c = ck
 			break
 		}
 	}
 	if c == nil {
-		t.Fatalf("expected %s cookie", RefreshCookieName)
+		t.Fatalf("expected %s cookie", targetName)
 	}
 
 	if c.Value != "tok123" {
 		t.Fatalf("expected value tok123, got %q", c.Value)
 	}
-	if c.Path != "/auth/v1" {
-		t.Fatalf("expected path /auth/v1, got %q", c.Path)
+	if c.Path != "/" {
+		t.Fatalf("expected path /, got %q", c.Path)
 	}
 	if !c.HttpOnly {
 		t.Fatalf("expected HttpOnly=true")
@@ -56,12 +58,14 @@ func TestClearRefreshToken_ClearsCookie(t *testing.T) {
 	t.Parallel()
 
 	rr := httptest.NewRecorder()
+	// secure=false -> name stays refresh_token
 	ClearRefreshToken(rr, false)
 
 	res := rr.Result()
 	defer res.Body.Close()
 
 	var c *http.Cookie
+	// secure=false, name is standard
 	for _, ck := range res.Cookies() {
 		if ck.Name == RefreshCookieName {
 			c = ck
@@ -75,8 +79,8 @@ func TestClearRefreshToken_ClearsCookie(t *testing.T) {
 	if c.Value != "" {
 		t.Fatalf("expected empty value, got %q", c.Value)
 	}
-	if c.Path != "/auth/v1" {
-		t.Fatalf("expected path /auth/v1, got %q", c.Path)
+	if c.Path != "/" {
+		t.Fatalf("expected path /, got %q", c.Path)
 	}
 	if c.MaxAge != -1 {
 		t.Fatalf("expected MaxAge=-1, got %d", c.MaxAge)
