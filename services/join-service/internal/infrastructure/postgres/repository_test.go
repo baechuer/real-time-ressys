@@ -25,6 +25,14 @@ func setupRepo(t *testing.T) (*postgres.Repository, *pgxpool.Pool) {
 	pool, err := pgxpool.New(context.Background(), dsn)
 	require.NoError(t, err)
 
+	// Wipe DB to ensure clean state
+	WipeDB(t, pool)
+
+	// Apply migrations
+	// We are in services/join-service/internal/infrastructure/postgres
+	// Migrations are in services/join-service/migrations
+	ApplyMigrations(t, pool, "../../../migrations")
+
 	// RESTART IDENTITY CASCADE ensures that all sequences are reset and
 	// dependent data in all related tables is wiped clean for a fresh test run.
 	_, err = pool.Exec(context.Background(), "TRUNCATE TABLE joins, event_capacity, outbox, event_bans, processed_messages RESTART IDENTITY CASCADE")

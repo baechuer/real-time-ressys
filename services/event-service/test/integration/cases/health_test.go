@@ -39,7 +39,7 @@ func TestEvents_KeysetPagination(t *testing.T) {
 			"end_time":    time.Now().UTC().Add(time.Duration(i+1) * time.Hour).Format(time.RFC3339),
 			"capacity":    100, // 显式添加字段
 		}
-		code, env := doJSON(t, "POST", e.BaseURL+"/event/v1/events", e.UserToken, body)
+		code, env := doJSON(t, "POST", e.BaseURL+"/event/v1/events", e.OrganizerToken, body)
 		if code != 201 {
 			t.Fatalf("setup create failed at index %d: want 201 got %d, err: %+v", i, code, env.Error)
 		}
@@ -47,7 +47,7 @@ func TestEvents_KeysetPagination(t *testing.T) {
 		var created struct{ ID string }
 		_ = json.Unmarshal(env.Data, &created)
 
-		pubCode, pubEnv := doJSON(t, "POST", e.BaseURL+"/event/v1/events/"+created.ID+"/publish", e.UserToken, nil)
+		pubCode, pubEnv := doJSON(t, "POST", e.BaseURL+"/event/v1/events/"+created.ID+"/publish", e.OrganizerToken, nil)
 		if pubCode != 200 {
 			t.Fatalf("setup publish failed at index %d: want 200 got %d, err: %+v", i, pubCode, pubEnv.Error)
 		}
@@ -81,7 +81,7 @@ func TestEvents_Search(t *testing.T) {
 	createAndPublish(t, e, "Golang Workshop", "Learn microservices")
 	createAndPublish(t, e, "Python Party", "Data science fun")
 
-	code, env := doJSON(t, "GET", e.BaseURL+"/event/v1/events?q=microservices", "", nil)
+	code, env := doJSON(t, "GET", e.BaseURL+"/event/v1/events?q=microservices&sort=relevance", "", nil)
 	assert.Equal(t, http.StatusOK, code) //
 
 	var resp dto.PageResp[dto.EventResp]
