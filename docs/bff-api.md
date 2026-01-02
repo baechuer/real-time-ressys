@@ -127,3 +127,193 @@ interface EventView {
   };
 }
 ```
+auth service.env:
+
+APP_ENV=dev
+HTTP_ADDR=:8080
+
+JWT_SECRET=change_me
+ACCESS_TOKEN_TTL=15m
+REFRESH_TOKEN_TTL=168h
+
+DB_ADDR=postgres://user:pass@127.0.0.1:5432/app?sslmode=disable
+
+# --- Redis (TokenVersion cache etc.) ---
+REDIS_ADDR=localhost:6379
+REDIS_PASSWORD=
+REDIS_DB=0
+TOKENVER_CACHE_TTL=10m
+REDIS_ENABLED=true
+
+RABBIT_URL=amqp://guest:guest@localhost:5672/
+HTTP_READ_TIMEOUT=10s
+HTTP_WRITE_TIMEOUT=90s
+HTTP_IDLE_TIMEOUT=60s
+
+LOG_LEVEL=debug
+LOG_FORMAT=console   # In Production change it to json
+VERIFY_EMAIL_BASE_URL=http://localhost:8080/auth/v1/verify-email/confirm?token=
+PASSWORD_RESET_BASE_URL=http://localhost:8080/auth/v1/password/reset/validate?token=
+#VERIFY_EMAIL_BASE_URL=https://api.cityevents.com/auth/v1/verify-email/confirm?token=
+#PASSWORD_RESET_BASE_URL=https://api.cityevents.com/auth/v1/password/reset/validate?token=
+RABBIT_URL=amqp://guest:guest@localhost:5672/
+
+VERIFY_EMAIL_TOKEN_TTL=24h
+PASSWORD_RESET_TOKEN_TTL=30m
+POSTGRES_USER=user
+POSTGRES_PASSWORD=pass
+POSTGRES_DB=app
+POSTGRES_PORT=5432
+DB_DEBUG=false
+AUTH_DEV_ECHO_TOKENS=true
+INTERNAL_SECRET_KEY=sharedkey
+
+bff:
+# Server Port
+HTTP_PORT=8080
+
+# Microservices URLs (Docker DNS names by default)
+# If running locally without docker-compose, use http://localhost:8081, etc.
+AUTH_SERVICE_URL=http://auth-service:8080
+EVENT_SERVICE_URL=http://event-service:8080
+JOIN_SERVICE_URL=http://join-service:8080
+# Local Debugging Mode
+# AUTH_SERVICE_URL=http://localhost:8081
+# EVENT_SERVICE_URL=http://localhost:8082
+# JOIN_SERVICE_URL=http://localhost:8083 email service
+RABBIT_URL=amqp://guest:guest@localhost:5672/
+RABBIT_EXCHANGE=city.events
+RABBIT_QUEUE=email-service.q
+RABBIT_BIND_KEYS=auth.email.#,auth.password.#
+RABBIT_PREFETCH=10
+RABBIT_CONSUMER_TAG=email-service
+LOG_LEVEL=info
+LOG_FORMAT=console
+LOG_COLOR=0
+LOG_CALLER=1
+# LOG_TIME_FORMAT=2006-01-02T15:04:05Z07:00  # 可不填，默认 RFC3339
+FAKE_FAIL_MODE=none
+# EMAIL_MAX_ATTEMPTS=5
+# 让 circuit breaker 不要太快开（本地演示可先高一点）
+#EMAIL_CB_THRESHOLD=999
+# choose sender: fake | smtp
+EMAIL_SENDER=fake
+
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USERNAME=baechuer@gmail.com
+SMTP_PASSWORD=tzzo qrsi hftx frfn   # Gmail App Password
+SMTP_FROM=City Event Platform <baechuer@gmail.com>
+
+# optional
+SMTP_TIMEOUT=10s
+
+# HTML server
+EMAIL_WEB_ADDR=:8090
+AUTH_BASE_URL=http://localhost:8080
+AUTH_VERIFY_CONFIRM_PATH=/auth/v1/verify-email/confirm
+AUTH_RESET_VALIDATE_PATH=/auth/v1/password/reset/validate
+AUTH_RESET_CONFIRM_PATH=/auth/v1/password/reset/confirm
+EMAIL_PUBLIC_BASE_URL=http://localhost:8090
+#Redis
+
+REDIS_ENABLED=true
+REDIS_ADDR=localhost:6379
+REDIS_PASSWORD=
+REDIS_DB=0
+EMAIL_IDEMPOTENCY_TTL=24h
+# --- HTTP/API rate limiting (email-service web :8090) ---
+RL_ENABLED=true
+
+# per-IP limit (per endpoint)
+RL_IP_LIMIT=30
+RL_IP_WINDOW=1m
+
+# per-token limit (per endpoint)
+RL_TOKEN_LIMIT=10
+RL_TOKEN_WINDOW=10m
+INTERNAL_SECRET_KEY=sharedkey
+
+event service:
+# --- Service Base Settings ---
+APP_ENV=dev
+HTTP_ADDR=:8081
+# Recommended for local development in Sydney
+TZ=Australia/Sydney
+
+# --- PostgreSQL Database ---
+# Format: postgres://user:password@host:port/dbname?sslmode=disable
+# Ensure you create the 'cityevents_event' database in your Postgres instance
+DATABASE_URL=postgres://user:pass@127.0.0.1:5432/app?sslmode=disable
+POSTGRES_USER=user
+POSTGRES_PASSWORD=pass
+POSTGRES_DB=app
+POSTGRES_PORT=5432
+DB_DEBUG=false
+
+# --- Authentication (JWT Local Validation) ---
+# IMPORTANT: This MUST match the JWT_SECRET used in your auth-service
+JWT_SECRET=change_me
+JWT_ISSUER=auth-service
+
+# --- Redis (Blacklist & Rate Limiting) ---
+REDIS_ENABLED=true
+REDIS_ADDR=localhost:6379
+REDIS_PASSWORD=
+# Use a different DB index than email-service (e.g., DB 1) to avoid key collision
+REDIS_DB=1
+
+# --- Rate Limiting (Event API) ---
+RL_ENABLED=true
+RL_IP_LIMIT=100
+RL_IP_WINDOW=1m
+
+# --- RabbitMQ (Event Publisher) ---
+# Used to publish "event.created" or "event.published" messages
+RABBIT_URL=amqp://guest:guest@localhost:5672/
+RABBIT_EXCHANGE=city.events
+
+# --- Logger ---
+LOG_LEVEL=debug
+LOG_FORMAT=console
+join servcice:
+
+# -------- Runtime --------
+APP_ENV=dev
+DEBUG=true
+PORT=8083
+TZ=Australia/Sydney
+
+# -------- PostgreSQL --------
+POSTGRES_ADDR=127.0.0.1:5432
+POSTGRES_USER=user
+POSTGRES_PASSWORD=pass
+POSTGRES_DB=app
+POSTGRES_SSLMODE=disable
+
+# -------- JWT --------
+JWT_SECRET=change_me
+JWT_ISSUER=auth-service
+
+# -------- Redis --------
+REDIS_ADDR=127.0.0.1:6379
+REDIS_PASSWORD=
+REDIS_DB=2
+
+# -------- Cache --------
+CACHE_USER_TTL=10m
+
+# -------- Rate limit --------
+RL_ENABLED=true
+RL_REQUESTS_LIMIT=100
+RL_WINDOW_SECONDS=60
+
+# -------- RabbitMQ --------
+RABBITMQ_URL=amqp://guest:guest@localhost:5672/
+RABBITMQ_EXCHANGE=city.events
+
+# -------- Logging --------
+LOG_LEVEL=debug
+
+
+is it because ur config was wrong?
